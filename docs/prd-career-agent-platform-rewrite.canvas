@@ -1,0 +1,131 @@
+{
+  "nodes": [
+    {
+      "id": "0f4e1a2b3c5d6e70",
+      "type": "group",
+      "x": -420,
+      "y": -320,
+      "width": 1700,
+      "height": 980,
+      "label": "Career Agent Platform PRD Rewrite Map",
+      "color": "5"
+    },
+    {
+      "id": "1a2b3c4d5e6f7081",
+      "type": "text",
+      "x": -360,
+      "y": -240,
+      "width": 360,
+      "height": 220,
+      "color": "2",
+      "text": "# 当前 PRD 状态\n\n更像 BRD/立项稿：\n- 讲清融合价值\n- 讲清大范围\n- 缺少可执行细节\n- 缺少页面/接口/验收展开"
+    },
+    {
+      "id": "2b3c4d5e6f708192",
+      "type": "text",
+      "x": 80,
+      "y": -260,
+      "width": 420,
+      "height": 260,
+      "color": "1",
+      "text": "# 主要空泛点\n\n1. 用户故事没有场景化\n2. 功能需求没有输入/输出/状态\n3. AI 输出没有结构化契约\n4. 前端页面没有任务流\n5. 数据模型没有业务字段解释\n6. 验收标准没有用例级标准\n7. 竞品分析缺少能力维度对比"
+    },
+    {
+      "id": "3c4d5e6f708192a3",
+      "type": "text",
+      "x": 600,
+      "y": -260,
+      "width": 520,
+      "height": 260,
+      "color": "4",
+      "text": "# 目标 PRD 形态\n\n产品落地型 PRD：\n- 能用于需求评审\n- 能用于研发拆解\n- 能用于测试验收\n- 能用于答辩讲项目厚度\n\n推荐以 MVP 闭环为主线，逐模块展开。"
+    },
+    {
+      "id": "4d5e6f708192a3b4",
+      "type": "text",
+      "x": -360,
+      "y": 100,
+      "width": 360,
+      "height": 300,
+      "color": "6",
+      "text": "# MVP 用户闭环\n\n1. 上传简历\n2. 校验解析结果\n3. 创建目标 JD\n4. 查看匹配报告\n5. 生成优化建议\n6. 采纳建议形成新版本\n7. 开始文字模拟面试\n8. 查看复盘报告\n9. 反哺下一轮优化"
+    },
+    {
+      "id": "5e6f708192a3b4c5",
+      "type": "text",
+      "x": 80,
+      "y": 100,
+      "width": 420,
+      "height": 300,
+      "color": "3",
+      "text": "# 每个功能必须展开\n\n- 用户目标\n- 前置条件\n- 入口页面\n- 输入字段\n- 输出字段\n- 状态流转\n- 异常与空状态\n- 权限边界\n- Trace 要求\n- 验收标准"
+    },
+    {
+      "id": "6f708192a3b4c5d6",
+      "type": "text",
+      "x": 600,
+      "y": 100,
+      "width": 520,
+      "height": 300,
+      "color": "5",
+      "text": "# 建议重写目录\n\n1. 产品目标与非目标\n2. Persona 与核心场景\n3. MVP 端到端旅程\n4. 信息架构与页面清单\n5. 功能详细需求\n6. AI/Prompt 输出契约\n7. 数据对象与状态机\n8. API 需求概要\n9. 管理后台需求\n10. 竞品能力矩阵\n11. 验收用例与测试矩阵\n12. 分阶段交付"
+    },
+    {
+      "id": "708192a3b4c5d6e7",
+      "type": "text",
+      "x": -360,
+      "y": 500,
+      "width": 360,
+      "height": 120,
+      "color": "1",
+      "text": "# 已确认决策\n\n采用产品落地型 PRD。\n\nPhase 1/2 展开到可验收级；Phase 3/4 保持路线图级。\n\n直接覆盖现有主 PRD。"
+    }
+  ],
+  "edges": [
+    {
+      "id": "a111111111111111",
+      "fromNode": "1a2b3c4d5e6f7081",
+      "fromSide": "right",
+      "toNode": "2b3c4d5e6f708192",
+      "toSide": "left",
+      "toEnd": "arrow",
+      "label": "暴露问题"
+    },
+    {
+      "id": "b222222222222222",
+      "fromNode": "2b3c4d5e6f708192",
+      "fromSide": "right",
+      "toNode": "3c4d5e6f708192a3",
+      "toSide": "left",
+      "toEnd": "arrow",
+      "label": "重写目标"
+    },
+    {
+      "id": "c333333333333333",
+      "fromNode": "3c4d5e6f708192a3",
+      "fromSide": "bottom",
+      "toNode": "6f708192a3b4c5d6",
+      "toSide": "top",
+      "toEnd": "arrow",
+      "label": "落到目录"
+    },
+    {
+      "id": "d444444444444444",
+      "fromNode": "4d5e6f708192a3b4",
+      "fromSide": "right",
+      "toNode": "5e6f708192a3b4c5",
+      "toSide": "left",
+      "toEnd": "arrow",
+      "label": "逐功能展开"
+    },
+    {
+      "id": "e555555555555555",
+      "fromNode": "5e6f708192a3b4c5",
+      "fromSide": "right",
+      "toNode": "6f708192a3b4c5d6",
+      "toSide": "left",
+      "toEnd": "arrow",
+      "label": "形成 PRD 模板"
+    }
+  ]
+}
