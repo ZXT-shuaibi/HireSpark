@@ -3,6 +3,12 @@ import { Navigate, createBrowserRouter } from "react-router-dom";
 import { LoginPage } from "@/pages/LoginPage";
 import { ChatPage } from "@/pages/ChatPage";
 import { NotFoundPage } from "@/pages/NotFoundPage";
+import { CareerHomePage } from "@/pages/career/CareerHomePage";
+import { CareerInterviewPage } from "@/pages/career/CareerInterviewPage";
+import { CareerOptimizationPage } from "@/pages/career/CareerOptimizationPage";
+import { CareerDashboardPage } from "@/pages/admin/career/CareerDashboardPage";
+import { CareerTasksPage } from "@/pages/admin/career/CareerTasksPage";
+import { CareerRubricPage } from "@/pages/admin/career/CareerRubricPage";
 import { AdminLayout } from "@/pages/admin/AdminLayout";
 import { DashboardPage } from "@/pages/admin/dashboard/DashboardPage";
 import { KnowledgeListPage } from "@/pages/admin/knowledge/KnowledgeListPage";
@@ -86,6 +92,30 @@ export const router = createBrowserRouter([
     )
   },
   {
+    path: "/career",
+    element: (
+      <RequireAuth>
+        <CareerHomePage />
+      </RequireAuth>
+    )
+  },
+  {
+    path: "/career/optimizations",
+    element: (
+      <RequireAuth>
+        <CareerOptimizationPage />
+      </RequireAuth>
+    )
+  },
+  {
+    path: "/career/interviews",
+    element: (
+      <RequireAuth>
+        <CareerInterviewPage />
+      </RequireAuth>
+    )
+  },
+  {
     path: "/admin",
     element: (
       <RequireAdmin>
@@ -136,6 +166,18 @@ export const router = createBrowserRouter([
       {
         path: "traces/:traceId",
         element: <RagTraceDetailPage />
+      },
+      {
+        path: "career",
+        element: <CareerDashboardPage />
+      },
+      {
+        path: "career/tasks",
+        element: <CareerTasksPage />
+      },
+      {
+        path: "career/rubric",
+        element: <CareerRubricPage />
       },
       {
         path: "settings",

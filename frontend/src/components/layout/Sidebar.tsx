@@ -3,6 +3,7 @@ import { differenceInCalendarDays, isValid } from "date-fns";
 import {
   BookOpen,
   Bot,
+  BriefcaseBusiness,
   LogOut,
   MessageSquare,
   MoreHorizontal,
@@ -211,6 +212,22 @@ export function Sidebar({ isOpen, onClose }: SidebarProps) {
                 <span className="flex-1">
                   <span className="block text-sm font-semibold text-[#1F2937]">新建对话</span>
                   <span className="block text-xs text-[#94A3B8]">从空白开始</span>
+                </span>
+              </button>
+              <button
+                type="button"
+                className="mt-2 flex w-full items-center gap-3 rounded-2xl bg-white/80 px-4 py-3 text-left transition-all hover:bg-white hover:shadow-[0_10px_20px_rgba(15,23,42,0.08)]"
+                onClick={() => {
+                  navigate("/career");
+                  onClose();
+                }}
+              >
+                <span className="flex h-11 w-11 items-center justify-center rounded-2xl bg-[#0F766E] text-white shadow-[0_6px_14px_rgba(15,118,110,0.25)]">
+                  <BriefcaseBusiness className="h-4 w-4" />
+                </span>
+                <span className="flex-1">
+                  <span className="block text-sm font-semibold text-[#1F2937]">Career</span>
+                  <span className="block text-xs text-[#94A3B8]">Resume / JD / Interview</span>
                 </span>
               </button>
               {user?.role === "admin" ? (
