@@ -15,28 +15,21 @@
  * limitations under the License.
  */
 
-package com.nageoffer.ai.ragent;
+package com.nageoffer.ai.ragent.career.enums;
 
-import org.mybatis.spring.annotation.MapperScan;
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.scheduling.annotation.EnableScheduling;
+public enum InterviewRuntimeStatus {
 
-/**
- * Ragent 核心应用启动类
- */
-@SpringBootApplication
-@EnableScheduling
-@MapperScan(basePackages = {
-        "com.nageoffer.ai.ragent.rag.dao.mapper",
-        "com.nageoffer.ai.ragent.ingestion.dao.mapper",
-        "com.nageoffer.ai.ragent.knowledge.dao.mapper",
-        "com.nageoffer.ai.ragent.career.dao.mapper",
-        "com.nageoffer.ai.ragent.user.dao.mapper"
-})
-public class RagentApplication {
-
-    public static void main(String[] args) {
-        SpringApplication.run(RagentApplication.class, args);
-    }
+    WAITING_ANSWER,
+    ANSWER_SAVED,
+    NOT_STARTED,
+    EVALUATING,
+    EVALUATED,
+    EVALUATION_FAILED,
+    FOLLOW_UP_DECIDING,
+    FOLLOW_UP_CREATED,
+    NEXT_MAIN_CREATED,
+    SESSION_COMPLETED,
+    NONE,
+    COMPENSATING,
+    COMPENSATED
 }

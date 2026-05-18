@@ -15,28 +15,24 @@
  * limitations under the License.
  */
 
-package com.nageoffer.ai.ragent;
+package com.nageoffer.ai.ragent.career.service;
 
-import org.mybatis.spring.annotation.MapperScan;
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.scheduling.annotation.EnableScheduling;
+import com.nageoffer.ai.ragent.career.controller.request.CareerInterviewAnswerRequest;
+import com.nageoffer.ai.ragent.career.controller.request.CareerInterviewCreateRequest;
+import com.nageoffer.ai.ragent.career.controller.vo.CareerInterviewSessionVO;
+import com.nageoffer.ai.ragent.career.controller.vo.CareerInterviewTurnVO;
 
-/**
- * Ragent 核心应用启动类
- */
-@SpringBootApplication
-@EnableScheduling
-@MapperScan(basePackages = {
-        "com.nageoffer.ai.ragent.rag.dao.mapper",
-        "com.nageoffer.ai.ragent.ingestion.dao.mapper",
-        "com.nageoffer.ai.ragent.knowledge.dao.mapper",
-        "com.nageoffer.ai.ragent.career.dao.mapper",
-        "com.nageoffer.ai.ragent.user.dao.mapper"
-})
-public class RagentApplication {
+public interface InterviewSessionService {
 
-    public static void main(String[] args) {
-        SpringApplication.run(RagentApplication.class, args);
-    }
+    CareerInterviewSessionVO createSession(CareerInterviewCreateRequest request);
+
+    CareerInterviewSessionVO querySession(String sessionId);
+
+    CareerInterviewTurnVO nextQuestion(String sessionId);
+
+    CareerInterviewTurnVO submitAnswer(String sessionId, CareerInterviewAnswerRequest request);
+
+    void pause(String sessionId);
+
+    void finish(String sessionId);
 }

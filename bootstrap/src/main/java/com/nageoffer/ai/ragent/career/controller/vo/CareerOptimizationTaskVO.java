@@ -15,28 +15,41 @@
  * limitations under the License.
  */
 
-package com.nageoffer.ai.ragent;
+package com.nageoffer.ai.ragent.career.controller.vo;
 
-import org.mybatis.spring.annotation.MapperScan;
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.scheduling.annotation.EnableScheduling;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
-/**
- * Ragent 核心应用启动类
- */
-@SpringBootApplication
-@EnableScheduling
-@MapperScan(basePackages = {
-        "com.nageoffer.ai.ragent.rag.dao.mapper",
-        "com.nageoffer.ai.ragent.ingestion.dao.mapper",
-        "com.nageoffer.ai.ragent.knowledge.dao.mapper",
-        "com.nageoffer.ai.ragent.career.dao.mapper",
-        "com.nageoffer.ai.ragent.user.dao.mapper"
-})
-public class RagentApplication {
+import java.math.BigDecimal;
+import java.util.List;
 
-    public static void main(String[] args) {
-        SpringApplication.run(RagentApplication.class, args);
-    }
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class CareerOptimizationTaskVO {
+
+    private String id;
+
+    private String status;
+
+    private String resumeVersionId;
+
+    private String jdId;
+
+    private String summary;
+
+    private BigDecimal qualityScore;
+
+    private String reviewStatus;
+
+    private String riskSummary;
+
+    private List<CareerOptimizationSuggestionVO> suggestions;
+
+    private List<CareerProgressEventVO> progressEvents;
+
+    private String traceId;
 }

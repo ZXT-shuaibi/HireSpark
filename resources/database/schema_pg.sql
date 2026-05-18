@@ -435,6 +435,504 @@ COMMENT ON COLUMN t_knowledge_vector.metadata IS '元数据';
 COMMENT ON COLUMN t_knowledge_vector.embedding IS '向量';
 
 -- ============================================
+-- Career Agent Platform Tables
+-- ============================================
+
+CREATE TABLE t_career_candidate_profile (
+    id           VARCHAR(20) NOT NULL PRIMARY KEY,
+    user_id      VARCHAR(20) NOT NULL,
+    display_name VARCHAR(128),
+    headline     VARCHAR(255),
+    summary      TEXT,
+    profile_json JSONB,
+    created_by   VARCHAR(20),
+    updated_by   VARCHAR(20),
+    create_time  TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time  TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted      SMALLINT    NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_career_profile_user ON t_career_candidate_profile (user_id);
+CREATE INDEX idx_career_profile_deleted ON t_career_candidate_profile (deleted);
+COMMENT ON TABLE t_career_candidate_profile IS '求职者画像表';
+COMMENT ON COLUMN t_career_candidate_profile.id IS '主键ID';
+COMMENT ON COLUMN t_career_candidate_profile.user_id IS '用户ID';
+COMMENT ON COLUMN t_career_candidate_profile.display_name IS '展示姓名';
+COMMENT ON COLUMN t_career_candidate_profile.headline IS '职业标题';
+COMMENT ON COLUMN t_career_candidate_profile.summary IS '画像摘要';
+COMMENT ON COLUMN t_career_candidate_profile.profile_json IS '结构化画像JSON';
+COMMENT ON COLUMN t_career_candidate_profile.created_by IS '创建人';
+COMMENT ON COLUMN t_career_candidate_profile.updated_by IS '修改人';
+COMMENT ON COLUMN t_career_candidate_profile.create_time IS '创建时间';
+COMMENT ON COLUMN t_career_candidate_profile.update_time IS '更新时间';
+COMMENT ON COLUMN t_career_candidate_profile.deleted IS '是否删除 0：正常 1：删除';
+
+CREATE TABLE t_career_resume_document (
+    id            VARCHAR(20) NOT NULL PRIMARY KEY,
+    user_id       VARCHAR(20) NOT NULL,
+    profile_id    VARCHAR(20),
+    original_name VARCHAR(255),
+    file_url      VARCHAR(512),
+    file_type     VARCHAR(32),
+    file_size     BIGINT,
+    parse_status  VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+    raw_text      TEXT,
+    parse_error   TEXT,
+    trace_id      VARCHAR(64),
+    created_by    VARCHAR(20),
+    updated_by    VARCHAR(20),
+    create_time   TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time   TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted       SMALLINT    NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_career_resume_doc_user ON t_career_resume_document (user_id);
+CREATE INDEX idx_career_resume_doc_profile ON t_career_resume_document (profile_id);
+CREATE INDEX idx_career_resume_doc_status ON t_career_resume_document (parse_status);
+CREATE INDEX idx_career_resume_doc_trace ON t_career_resume_document (trace_id);
+COMMENT ON TABLE t_career_resume_document IS '简历原始文档表';
+COMMENT ON COLUMN t_career_resume_document.id IS '主键ID';
+COMMENT ON COLUMN t_career_resume_document.user_id IS '用户ID';
+COMMENT ON COLUMN t_career_resume_document.profile_id IS '求职者画像ID';
+COMMENT ON COLUMN t_career_resume_document.original_name IS '原始文件名';
+COMMENT ON COLUMN t_career_resume_document.file_url IS '文件地址';
+COMMENT ON COLUMN t_career_resume_document.file_type IS '文件类型';
+COMMENT ON COLUMN t_career_resume_document.file_size IS '文件大小';
+COMMENT ON COLUMN t_career_resume_document.parse_status IS '解析状态';
+COMMENT ON COLUMN t_career_resume_document.raw_text IS '提取后的原始文本';
+COMMENT ON COLUMN t_career_resume_document.parse_error IS '解析失败原因';
+COMMENT ON COLUMN t_career_resume_document.trace_id IS 'Trace ID';
+COMMENT ON COLUMN t_career_resume_document.created_by IS '创建人';
+COMMENT ON COLUMN t_career_resume_document.updated_by IS '修改人';
+COMMENT ON COLUMN t_career_resume_document.create_time IS '创建时间';
+COMMENT ON COLUMN t_career_resume_document.update_time IS '更新时间';
+COMMENT ON COLUMN t_career_resume_document.deleted IS '是否删除 0：正常 1：删除';
+
+CREATE TABLE t_career_resume_version (
+    id               VARCHAR(20) NOT NULL PRIMARY KEY,
+    user_id          VARCHAR(20) NOT NULL,
+    profile_id       VARCHAR(20),
+    document_id      VARCHAR(20),
+    title            VARCHAR(128) NOT NULL,
+    version_no       INTEGER     NOT NULL DEFAULT 1,
+    source_type      VARCHAR(32) NOT NULL,
+    content_json     JSONB,
+    markdown_content TEXT,
+    active           SMALLINT    NOT NULL DEFAULT 1,
+    created_by       VARCHAR(20),
+    updated_by       VARCHAR(20),
+    create_time      TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time      TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted          SMALLINT    NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_career_resume_version_user ON t_career_resume_version (user_id);
+CREATE INDEX idx_career_resume_version_profile ON t_career_resume_version (profile_id);
+CREATE INDEX idx_career_resume_version_doc ON t_career_resume_version (document_id);
+COMMENT ON TABLE t_career_resume_version IS '简历版本表';
+COMMENT ON COLUMN t_career_resume_version.id IS '主键ID';
+COMMENT ON COLUMN t_career_resume_version.user_id IS '用户ID';
+COMMENT ON COLUMN t_career_resume_version.profile_id IS '求职者画像ID';
+COMMENT ON COLUMN t_career_resume_version.document_id IS '来源简历文档ID';
+COMMENT ON COLUMN t_career_resume_version.title IS '版本标题';
+COMMENT ON COLUMN t_career_resume_version.version_no IS '版本号';
+COMMENT ON COLUMN t_career_resume_version.source_type IS '版本来源类型';
+COMMENT ON COLUMN t_career_resume_version.content_json IS '结构化简历内容JSON';
+COMMENT ON COLUMN t_career_resume_version.markdown_content IS 'Markdown简历正文';
+COMMENT ON COLUMN t_career_resume_version.active IS '是否启用 1：启用 0：停用';
+COMMENT ON COLUMN t_career_resume_version.created_by IS '创建人';
+COMMENT ON COLUMN t_career_resume_version.updated_by IS '修改人';
+COMMENT ON COLUMN t_career_resume_version.create_time IS '创建时间';
+COMMENT ON COLUMN t_career_resume_version.update_time IS '更新时间';
+COMMENT ON COLUMN t_career_resume_version.deleted IS '是否删除 0：正常 1：删除';
+
+CREATE TABLE t_career_job_description (
+    id              VARCHAR(20)  NOT NULL PRIMARY KEY,
+    user_id         VARCHAR(20)  NOT NULL,
+    title           VARCHAR(128) NOT NULL,
+    company         VARCHAR(128),
+    source_type     VARCHAR(32),
+    source_location VARCHAR(512),
+    raw_text        TEXT,
+    parsed_json     JSONB,
+    created_by      VARCHAR(20),
+    updated_by      VARCHAR(20),
+    create_time     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time     TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted         SMALLINT     NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_career_jd_user ON t_career_job_description (user_id);
+CREATE INDEX idx_career_jd_title ON t_career_job_description (title);
+COMMENT ON TABLE t_career_job_description IS '目标岗位JD表';
+COMMENT ON COLUMN t_career_job_description.id IS '主键ID';
+COMMENT ON COLUMN t_career_job_description.user_id IS '用户ID';
+COMMENT ON COLUMN t_career_job_description.title IS '岗位标题';
+COMMENT ON COLUMN t_career_job_description.company IS '公司名称';
+COMMENT ON COLUMN t_career_job_description.source_type IS '来源类型';
+COMMENT ON COLUMN t_career_job_description.source_location IS '来源位置';
+COMMENT ON COLUMN t_career_job_description.raw_text IS 'JD原文';
+COMMENT ON COLUMN t_career_job_description.parsed_json IS '结构化JD解析JSON';
+COMMENT ON COLUMN t_career_job_description.created_by IS '创建人';
+COMMENT ON COLUMN t_career_job_description.updated_by IS '修改人';
+COMMENT ON COLUMN t_career_job_description.create_time IS '创建时间';
+COMMENT ON COLUMN t_career_job_description.update_time IS '更新时间';
+COMMENT ON COLUMN t_career_job_description.deleted IS '是否删除 0：正常 1：删除';
+
+CREATE TABLE t_career_job_alignment_report (
+    id                VARCHAR(20) NOT NULL PRIMARY KEY,
+    user_id           VARCHAR(20) NOT NULL,
+    resume_version_id VARCHAR(20) NOT NULL,
+    jd_id             VARCHAR(20) NOT NULL,
+    score             INTEGER,
+    summary           TEXT,
+    evidence_json     JSONB,
+    gaps_json         JSONB,
+    risks_json        JSONB,
+    trace_id          VARCHAR(64),
+    created_by        VARCHAR(20),
+    updated_by        VARCHAR(20),
+    create_time       TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time       TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted           SMALLINT    NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_career_alignment_user ON t_career_job_alignment_report (user_id);
+CREATE INDEX idx_career_alignment_resume ON t_career_job_alignment_report (resume_version_id);
+CREATE INDEX idx_career_alignment_jd ON t_career_job_alignment_report (jd_id);
+CREATE INDEX idx_career_alignment_resume_jd ON t_career_job_alignment_report (resume_version_id, jd_id);
+CREATE INDEX idx_career_alignment_trace ON t_career_job_alignment_report (trace_id);
+COMMENT ON TABLE t_career_job_alignment_report IS '简历JD匹配分析报告表';
+COMMENT ON COLUMN t_career_job_alignment_report.id IS '主键ID';
+COMMENT ON COLUMN t_career_job_alignment_report.user_id IS '用户ID';
+COMMENT ON COLUMN t_career_job_alignment_report.resume_version_id IS '简历版本ID';
+COMMENT ON COLUMN t_career_job_alignment_report.jd_id IS 'JD ID';
+COMMENT ON COLUMN t_career_job_alignment_report.score IS '匹配总分';
+COMMENT ON COLUMN t_career_job_alignment_report.summary IS '报告摘要';
+COMMENT ON COLUMN t_career_job_alignment_report.evidence_json IS '证据JSON';
+COMMENT ON COLUMN t_career_job_alignment_report.gaps_json IS '差距JSON';
+COMMENT ON COLUMN t_career_job_alignment_report.risks_json IS '风险JSON';
+COMMENT ON COLUMN t_career_job_alignment_report.trace_id IS 'Trace ID';
+COMMENT ON COLUMN t_career_job_alignment_report.created_by IS '创建人';
+COMMENT ON COLUMN t_career_job_alignment_report.updated_by IS '修改人';
+COMMENT ON COLUMN t_career_job_alignment_report.create_time IS '创建时间';
+COMMENT ON COLUMN t_career_job_alignment_report.update_time IS '更新时间';
+COMMENT ON COLUMN t_career_job_alignment_report.deleted IS '是否删除 0：正常 1：删除';
+
+CREATE TABLE t_career_resume_optimization_task (
+    id                VARCHAR(20) NOT NULL PRIMARY KEY,
+    user_id           VARCHAR(20) NOT NULL,
+    resume_version_id VARCHAR(20) NOT NULL,
+    jd_id             VARCHAR(20),
+    status            VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+    input_json        JSONB,
+    output_json       JSONB,
+    trace_id          VARCHAR(64),
+    error_message     TEXT,
+    created_by        VARCHAR(20),
+    updated_by        VARCHAR(20),
+    create_time       TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time       TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted           SMALLINT    NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_career_opt_task_user ON t_career_resume_optimization_task (user_id);
+CREATE INDEX idx_career_opt_task_resume ON t_career_resume_optimization_task (resume_version_id);
+CREATE INDEX idx_career_opt_task_status ON t_career_resume_optimization_task (status);
+CREATE INDEX idx_career_opt_task_trace ON t_career_resume_optimization_task (trace_id);
+COMMENT ON TABLE t_career_resume_optimization_task IS '简历优化任务表';
+COMMENT ON COLUMN t_career_resume_optimization_task.id IS '主键ID';
+COMMENT ON COLUMN t_career_resume_optimization_task.user_id IS '用户ID';
+COMMENT ON COLUMN t_career_resume_optimization_task.resume_version_id IS '简历版本ID';
+COMMENT ON COLUMN t_career_resume_optimization_task.jd_id IS 'JD ID';
+COMMENT ON COLUMN t_career_resume_optimization_task.status IS '任务状态';
+COMMENT ON COLUMN t_career_resume_optimization_task.input_json IS '任务输入JSON';
+COMMENT ON COLUMN t_career_resume_optimization_task.output_json IS '任务输出JSON';
+COMMENT ON COLUMN t_career_resume_optimization_task.trace_id IS 'Trace ID';
+COMMENT ON COLUMN t_career_resume_optimization_task.error_message IS '失败原因';
+COMMENT ON COLUMN t_career_resume_optimization_task.created_by IS '创建人';
+COMMENT ON COLUMN t_career_resume_optimization_task.updated_by IS '修改人';
+COMMENT ON COLUMN t_career_resume_optimization_task.create_time IS '创建时间';
+COMMENT ON COLUMN t_career_resume_optimization_task.update_time IS '更新时间';
+COMMENT ON COLUMN t_career_resume_optimization_task.deleted IS '是否删除 0：正常 1：删除';
+
+CREATE TABLE t_career_resume_optimization_suggestion (
+    id             VARCHAR(20) NOT NULL PRIMARY KEY,
+    task_id        VARCHAR(20) NOT NULL,
+    user_id        VARCHAR(20) NOT NULL,
+    category       VARCHAR(64),
+    title          VARCHAR(128),
+    original_text  TEXT,
+    suggested_text TEXT,
+    reason         TEXT,
+    risk_level     VARCHAR(32),
+    status         VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+    create_time    TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time    TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted        SMALLINT    NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_career_opt_suggestion_task ON t_career_resume_optimization_suggestion (task_id);
+CREATE INDEX idx_career_opt_suggestion_user ON t_career_resume_optimization_suggestion (user_id);
+CREATE INDEX idx_career_opt_suggestion_status ON t_career_resume_optimization_suggestion (status);
+COMMENT ON TABLE t_career_resume_optimization_suggestion IS '简历优化建议表';
+COMMENT ON COLUMN t_career_resume_optimization_suggestion.id IS '主键ID';
+COMMENT ON COLUMN t_career_resume_optimization_suggestion.task_id IS '优化任务ID';
+COMMENT ON COLUMN t_career_resume_optimization_suggestion.user_id IS '用户ID';
+COMMENT ON COLUMN t_career_resume_optimization_suggestion.category IS '建议分类';
+COMMENT ON COLUMN t_career_resume_optimization_suggestion.title IS '建议标题';
+COMMENT ON COLUMN t_career_resume_optimization_suggestion.original_text IS '原文';
+COMMENT ON COLUMN t_career_resume_optimization_suggestion.suggested_text IS '建议文本';
+COMMENT ON COLUMN t_career_resume_optimization_suggestion.reason IS '建议理由';
+COMMENT ON COLUMN t_career_resume_optimization_suggestion.risk_level IS '真实性风险等级';
+COMMENT ON COLUMN t_career_resume_optimization_suggestion.status IS '建议状态';
+COMMENT ON COLUMN t_career_resume_optimization_suggestion.create_time IS '创建时间';
+COMMENT ON COLUMN t_career_resume_optimization_suggestion.update_time IS '更新时间';
+COMMENT ON COLUMN t_career_resume_optimization_suggestion.deleted IS '是否删除 0：正常 1：删除';
+
+CREATE TABLE t_career_resume_optimization_review (
+    id                   VARCHAR(20) NOT NULL PRIMARY KEY,
+    task_id              VARCHAR(20) NOT NULL,
+    user_id              VARCHAR(20) NOT NULL,
+    iteration_no         INTEGER     NOT NULL DEFAULT 1,
+    executor_output_json JSONB,
+    reviewer_output_json JSONB,
+    quality_score        NUMERIC(5, 4),
+    truthfulness_risk    BOOLEAN     NOT NULL DEFAULT FALSE,
+    status               VARCHAR(32) NOT NULL,
+    trace_id             VARCHAR(64),
+    error_message        TEXT,
+    created_by           VARCHAR(20),
+    updated_by           VARCHAR(20),
+    create_time          TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time          TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted              SMALLINT    NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_career_opt_review_task ON t_career_resume_optimization_review (task_id);
+CREATE INDEX idx_career_opt_review_user ON t_career_resume_optimization_review (user_id);
+CREATE INDEX idx_career_opt_review_status ON t_career_resume_optimization_review (status);
+CREATE INDEX idx_career_opt_review_trace ON t_career_resume_optimization_review (trace_id);
+COMMENT ON TABLE t_career_resume_optimization_review IS 'Resume optimization quality review table';
+
+CREATE TABLE t_career_progress_event (
+    id           VARCHAR(20) NOT NULL PRIMARY KEY,
+    task_id      VARCHAR(20) NOT NULL,
+    user_id      VARCHAR(20) NOT NULL,
+    event_type   VARCHAR(64) NOT NULL,
+    message      VARCHAR(512),
+    payload_json JSONB,
+    create_time  TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted      SMALLINT    NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_career_progress_event_task ON t_career_progress_event (task_id, create_time);
+CREATE INDEX idx_career_progress_event_user ON t_career_progress_event (user_id);
+CREATE INDEX idx_career_progress_event_type ON t_career_progress_event (event_type);
+COMMENT ON TABLE t_career_progress_event IS 'Career task progress event table';
+
+CREATE TABLE t_career_single_flight_record (
+    id                VARCHAR(20)  NOT NULL PRIMARY KEY,
+    single_flight_key VARCHAR(256) NOT NULL,
+    scene             VARCHAR(64)  NOT NULL,
+    owner_id          VARCHAR(128),
+    fencing_token     BIGINT       NOT NULL DEFAULT 1,
+    status            VARCHAR(32)  NOT NULL,
+    heartbeat_time    TIMESTAMP,
+    request_count     INTEGER      NOT NULL DEFAULT 1,
+    result_json       JSONB,
+    error_type        VARCHAR(64),
+    trace_id          VARCHAR(64),
+    create_time       TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time       TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted           SMALLINT     NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX uk_career_single_flight_key ON t_career_single_flight_record (single_flight_key) WHERE deleted = 0;
+CREATE INDEX idx_career_single_flight_scene ON t_career_single_flight_record (scene);
+CREATE INDEX idx_career_single_flight_status ON t_career_single_flight_record (status);
+CREATE INDEX idx_career_single_flight_owner ON t_career_single_flight_record (owner_id, fencing_token);
+COMMENT ON TABLE t_career_single_flight_record IS 'Career AI single-flight governance table';
+
+CREATE TABLE t_career_task_attempt (
+    id                VARCHAR(20)  NOT NULL PRIMARY KEY,
+    user_id           VARCHAR(20),
+    business_id       VARCHAR(64),
+    scene             VARCHAR(64)  NOT NULL,
+    idempotency_key   VARCHAR(512),
+    single_flight_key VARCHAR(512),
+    trace_id          VARCHAR(64),
+    model_name        VARCHAR(128),
+    prompt_summary    TEXT,
+    status            VARCHAR(32)  NOT NULL,
+    replayed          BOOLEAN      NOT NULL DEFAULT FALSE,
+    latency_ms        BIGINT       NOT NULL DEFAULT 0,
+    error_type        VARCHAR(64),
+    error_message     TEXT,
+    create_time       TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time       TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted           SMALLINT     NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_career_attempt_user ON t_career_task_attempt (user_id);
+CREATE INDEX idx_career_attempt_business ON t_career_task_attempt (business_id);
+CREATE INDEX idx_career_attempt_scene ON t_career_task_attempt (scene);
+CREATE INDEX idx_career_attempt_status ON t_career_task_attempt (status);
+CREATE INDEX idx_career_attempt_trace ON t_career_task_attempt (trace_id);
+CREATE INDEX idx_career_attempt_single_flight ON t_career_task_attempt (single_flight_key);
+COMMENT ON TABLE t_career_task_attempt IS 'Career AI task attempt audit table';
+
+CREATE TABLE t_career_resume_export_record (
+    id                VARCHAR(20) NOT NULL PRIMARY KEY,
+    user_id           VARCHAR(20) NOT NULL,
+    resume_version_id VARCHAR(20) NOT NULL,
+    export_type       VARCHAR(32) NOT NULL,
+    file_url          VARCHAR(512),
+    status            VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+    error_message     TEXT,
+    template_version  VARCHAR(64),
+    validation_result_json JSONB,
+    trace_id          VARCHAR(64),
+    create_time       TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time       TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted           SMALLINT    NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_career_export_user ON t_career_resume_export_record (user_id);
+CREATE INDEX idx_career_export_resume ON t_career_resume_export_record (resume_version_id);
+COMMENT ON TABLE t_career_resume_export_record IS '简历导出记录表';
+COMMENT ON COLUMN t_career_resume_export_record.id IS '主键ID';
+COMMENT ON COLUMN t_career_resume_export_record.user_id IS '用户ID';
+COMMENT ON COLUMN t_career_resume_export_record.resume_version_id IS '简历版本ID';
+COMMENT ON COLUMN t_career_resume_export_record.export_type IS '导出类型';
+COMMENT ON COLUMN t_career_resume_export_record.file_url IS '导出文件地址';
+COMMENT ON COLUMN t_career_resume_export_record.status IS '导出状态';
+COMMENT ON COLUMN t_career_resume_export_record.error_message IS '失败原因';
+COMMENT ON COLUMN t_career_resume_export_record.template_version IS '渲染模板版本';
+COMMENT ON COLUMN t_career_resume_export_record.validation_result_json IS '渲染校验结果';
+COMMENT ON COLUMN t_career_resume_export_record.trace_id IS '渲染 Trace ID';
+COMMENT ON COLUMN t_career_resume_export_record.create_time IS '创建时间';
+COMMENT ON COLUMN t_career_resume_export_record.update_time IS '更新时间';
+COMMENT ON COLUMN t_career_resume_export_record.deleted IS '是否删除 0：正常 1：删除';
+
+CREATE TABLE t_career_interview_session (
+    id                VARCHAR(20) NOT NULL PRIMARY KEY,
+    user_id           VARCHAR(20) NOT NULL,
+    resume_version_id VARCHAR(20) NOT NULL,
+    jd_id             VARCHAR(20),
+    status            VARCHAR(32) NOT NULL DEFAULT 'CREATED',
+    plan_json         JSONB,
+    current_turn_no   INTEGER     NOT NULL DEFAULT 0,
+    trace_id          VARCHAR(64),
+    created_by        VARCHAR(20),
+    updated_by        VARCHAR(20),
+    create_time       TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time       TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted           SMALLINT    NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_career_interview_session_user ON t_career_interview_session (user_id);
+CREATE INDEX idx_career_interview_session_resume ON t_career_interview_session (resume_version_id);
+CREATE INDEX idx_career_interview_session_status ON t_career_interview_session (status);
+CREATE INDEX idx_career_interview_session_trace ON t_career_interview_session (trace_id);
+COMMENT ON TABLE t_career_interview_session IS '模拟面试会话表';
+COMMENT ON COLUMN t_career_interview_session.id IS '主键ID';
+COMMENT ON COLUMN t_career_interview_session.user_id IS '用户ID';
+COMMENT ON COLUMN t_career_interview_session.resume_version_id IS '简历版本ID';
+COMMENT ON COLUMN t_career_interview_session.jd_id IS 'JD ID';
+COMMENT ON COLUMN t_career_interview_session.status IS '会话状态';
+COMMENT ON COLUMN t_career_interview_session.plan_json IS '面试计划JSON';
+COMMENT ON COLUMN t_career_interview_session.current_turn_no IS '当前轮次';
+COMMENT ON COLUMN t_career_interview_session.trace_id IS 'Trace ID';
+COMMENT ON COLUMN t_career_interview_session.created_by IS '创建人';
+COMMENT ON COLUMN t_career_interview_session.updated_by IS '修改人';
+COMMENT ON COLUMN t_career_interview_session.create_time IS '创建时间';
+COMMENT ON COLUMN t_career_interview_session.update_time IS '更新时间';
+COMMENT ON COLUMN t_career_interview_session.deleted IS '是否删除 0：正常 1：删除';
+
+CREATE TABLE t_career_interview_turn (
+    id                         VARCHAR(20) NOT NULL PRIMARY KEY,
+    session_id                 VARCHAR(20) NOT NULL,
+    user_id                    VARCHAR(20) NOT NULL,
+    turn_no                    INTEGER     NOT NULL,
+    turn_type                  VARCHAR(32),
+    question                   TEXT,
+    answer                     TEXT,
+    feedback_json              JSONB,
+    status                     VARCHAR(32),
+    score                      INTEGER,
+    step_idempotency_key       VARCHAR(128),
+    answer_status              VARCHAR(32),
+    evaluation_status          VARCHAR(32),
+    follow_up_decision_status  VARCHAR(32),
+    compensation_status        VARCHAR(32),
+    attempt_count              INTEGER     NOT NULL DEFAULT 0,
+    last_error                 TEXT,
+    create_time                TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time                TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted                    SMALLINT    NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_career_interview_turn_session ON t_career_interview_turn (session_id);
+CREATE INDEX idx_career_interview_turn_user ON t_career_interview_turn (user_id);
+CREATE INDEX idx_career_interview_turn_step ON t_career_interview_turn (step_idempotency_key) WHERE deleted = 0;
+CREATE UNIQUE INDEX uk_career_interview_turn_no ON t_career_interview_turn (session_id, turn_no) WHERE deleted = 0;
+COMMENT ON TABLE t_career_interview_turn IS '模拟面试轮次表';
+COMMENT ON COLUMN t_career_interview_turn.id IS '主键ID';
+COMMENT ON COLUMN t_career_interview_turn.session_id IS '面试会话ID';
+COMMENT ON COLUMN t_career_interview_turn.user_id IS '用户ID';
+COMMENT ON COLUMN t_career_interview_turn.turn_no IS '轮次序号';
+COMMENT ON COLUMN t_career_interview_turn.turn_type IS '轮次类型';
+COMMENT ON COLUMN t_career_interview_turn.question IS '面试问题';
+COMMENT ON COLUMN t_career_interview_turn.answer IS '用户回答';
+COMMENT ON COLUMN t_career_interview_turn.feedback_json IS '反馈JSON';
+COMMENT ON COLUMN t_career_interview_turn.status IS '轮次状态';
+COMMENT ON COLUMN t_career_interview_turn.score IS '轮次评分';
+COMMENT ON COLUMN t_career_interview_turn.create_time IS '创建时间';
+COMMENT ON COLUMN t_career_interview_turn.update_time IS '更新时间';
+COMMENT ON COLUMN t_career_interview_turn.deleted IS '是否删除 0：正常 1：删除';
+
+CREATE TABLE t_career_interview_session_snapshot (
+    id                    VARCHAR(20) NOT NULL PRIMARY KEY,
+    session_id            VARCHAR(20) NOT NULL,
+    user_id               VARCHAR(20) NOT NULL,
+    version               INTEGER     NOT NULL DEFAULT 1,
+    snapshot_json         JSONB       NOT NULL,
+    last_applied_step_key VARCHAR(128),
+    status                VARCHAR(32),
+    created_by            VARCHAR(20),
+    updated_by            VARCHAR(20),
+    create_time           TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time           TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted               SMALLINT    NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_career_interview_snapshot_session ON t_career_interview_session_snapshot (session_id, version DESC);
+CREATE INDEX idx_career_interview_snapshot_user ON t_career_interview_session_snapshot (user_id);
+CREATE INDEX idx_career_interview_snapshot_step ON t_career_interview_session_snapshot (last_applied_step_key) WHERE deleted = 0;
+COMMENT ON TABLE t_career_interview_session_snapshot IS 'Interview session recovery snapshot table';
+COMMENT ON COLUMN t_career_interview_session_snapshot.session_id IS 'Interview session id';
+COMMENT ON COLUMN t_career_interview_session_snapshot.version IS 'Snapshot version';
+COMMENT ON COLUMN t_career_interview_session_snapshot.snapshot_json IS 'Recoverable session runtime JSON';
+COMMENT ON COLUMN t_career_interview_session_snapshot.last_applied_step_key IS 'Last applied turn idempotency key';
+
+CREATE TABLE t_career_interview_report (
+    id               VARCHAR(20) NOT NULL PRIMARY KEY,
+    session_id       VARCHAR(20) NOT NULL,
+    user_id          VARCHAR(20) NOT NULL,
+    overall_score    INTEGER,
+    radar_json       JSONB,
+    playback_json    JSONB,
+    suggestions_json JSONB,
+    summary          TEXT,
+    trace_id         VARCHAR(64),
+    create_time      TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time      TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted          SMALLINT    NOT NULL DEFAULT 0
+);
+CREATE INDEX idx_career_interview_report_session ON t_career_interview_report (session_id);
+CREATE INDEX idx_career_interview_report_user ON t_career_interview_report (user_id);
+CREATE INDEX idx_career_interview_report_trace ON t_career_interview_report (trace_id);
+COMMENT ON TABLE t_career_interview_report IS '模拟面试复盘报告表';
+COMMENT ON COLUMN t_career_interview_report.id IS '主键ID';
+COMMENT ON COLUMN t_career_interview_report.session_id IS '面试会话ID';
+COMMENT ON COLUMN t_career_interview_report.user_id IS '用户ID';
+COMMENT ON COLUMN t_career_interview_report.overall_score IS '综合评分';
+COMMENT ON COLUMN t_career_interview_report.radar_json IS '雷达图JSON';
+COMMENT ON COLUMN t_career_interview_report.playback_json IS '逐题复盘JSON';
+COMMENT ON COLUMN t_career_interview_report.suggestions_json IS '改进建议JSON';
+COMMENT ON COLUMN t_career_interview_report.summary IS '报告摘要';
+COMMENT ON COLUMN t_career_interview_report.trace_id IS 'Trace ID';
+COMMENT ON COLUMN t_career_interview_report.create_time IS '创建时间';
+COMMENT ON COLUMN t_career_interview_report.update_time IS '更新时间';
+COMMENT ON COLUMN t_career_interview_report.deleted IS '是否删除 0：正常 1：删除';
+
+-- ============================================
 -- Column Comments
 -- ============================================
 

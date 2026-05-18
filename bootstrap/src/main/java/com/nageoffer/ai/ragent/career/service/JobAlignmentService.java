@@ -15,28 +15,20 @@
  * limitations under the License.
  */
 
-package com.nageoffer.ai.ragent;
+package com.nageoffer.ai.ragent.career.service;
 
-import org.mybatis.spring.annotation.MapperScan;
-import org.springframework.boot.SpringApplication;
-import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.scheduling.annotation.EnableScheduling;
+import com.nageoffer.ai.ragent.career.controller.request.CareerAlignmentCreateRequest;
+import com.nageoffer.ai.ragent.career.controller.request.CareerJobCreateRequest;
+import com.nageoffer.ai.ragent.career.controller.vo.CareerAlignmentReportVO;
+import com.nageoffer.ai.ragent.career.controller.vo.CareerJobVO;
 
-/**
- * Ragent 核心应用启动类
- */
-@SpringBootApplication
-@EnableScheduling
-@MapperScan(basePackages = {
-        "com.nageoffer.ai.ragent.rag.dao.mapper",
-        "com.nageoffer.ai.ragent.ingestion.dao.mapper",
-        "com.nageoffer.ai.ragent.knowledge.dao.mapper",
-        "com.nageoffer.ai.ragent.career.dao.mapper",
-        "com.nageoffer.ai.ragent.user.dao.mapper"
-})
-public class RagentApplication {
+public interface JobAlignmentService {
 
-    public static void main(String[] args) {
-        SpringApplication.run(RagentApplication.class, args);
-    }
+    CareerJobVO createJob(CareerJobCreateRequest request);
+
+    CareerJobVO queryJob(String jdId);
+
+    CareerAlignmentReportVO align(CareerAlignmentCreateRequest request);
+
+    CareerAlignmentReportVO queryAlignment(String reportId);
 }
