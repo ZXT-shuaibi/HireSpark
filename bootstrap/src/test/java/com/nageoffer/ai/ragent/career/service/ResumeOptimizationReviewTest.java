@@ -221,20 +221,74 @@ class ResumeOptimizationReviewTest {
     @Test
     void reviewerLowScoreMarksTaskNeedsReviewAndBlocksVersionGeneration() {
         CreateTaskState state = setupCreateTaskMocks(
-                reviewerOutput(0.80D, false, List.of(), List.of(), List.of("suggestion-1"))
+                List.of(executorOutput(), executorOutput(), executorOutput()),
+                List.of(
+                        reviewerOutput(0.80D, false, List.of(), List.of(), List.of("suggestion-1")),
+                        reviewerOutput(0.79D, false, List.of(), List.of(), List.of("suggestion-1")),
+                        reviewerOutput(0.78D, false, List.of(), List.of(), List.of("suggestion-1"))
+                )
         );
 
         CareerOptimizationTaskVO result = newService().createTask(createRequest());
 
         assertEquals(CareerTaskStatus.NEEDS_REVIEW.name(), result.getStatus());
         assertEquals(OptimizationReviewStatus.NEEDS_REVISION.name(), result.getReviewStatus());
-        assertEquals(List.of("GENERATING", "REVIEWING", "NEEDS_REVIEW"), progressTypes(result));
+        assertEquals(List.of("GENERATING", "REVIEWING", "REVISING", "GENERATING",
+                "REVIEWING", "REVISING", "GENERATING", "REVIEWING", "NEEDS_REVIEW"), progressTypes(result));
+        assertEquals(List.of(1, 2, 3), state.reviews.stream().map(ResumeOptimizationReviewDO::getIterationNo).toList());
 
         when(taskMapper.selectOne(anyTaskWrapper())).thenAnswer(invocation -> state.task.get());
 
         assertThrows(ClientException.class,
                 () -> newService().generateVersionFromAcceptedSuggestions("task-1"));
         verify(resumeVersionMapper, never()).insert(any(ResumeVersionDO.class));
+    }
+
+    @Test
+    void lowScoreTriggersSecondExecutorIterationAndPersistsFinalSuggestionsOnly() {
+        Map<String, Object> firstOutput = executorOutput("First draft", "Built reliable APIs");
+        Map<String, Object> secondOutput = executorOutput("Second draft", "Built reliable Spring APIs with latency metrics");
+        CreateTaskState state = setupCreateTaskMocks(
+                List.of(firstOutput, secondOutput),
+                List.of(
+                        reviewerOutput(0.72D, false, List.of(), List.of(), List.of("suggestion-1")),
+                        reviewerOutput(0.86D, false, List.of(), List.of("suggestion-1"), List.of())
+                )
+        );
+
+        CareerOptimizationTaskVO result = newService().createTask(createRequest());
+
+        verify(singleFlightLlmService, times(4)).chat(anyString(), anyString(), anyString(), any(ChatRequest.class));
+        assertEquals(CareerTaskStatus.SUCCESS.name(), result.getStatus());
+        assertEquals(OptimizationReviewStatus.PASSED.name(), result.getReviewStatus());
+        assertEquals("Second draft", result.getSummary());
+        assertEquals(List.of("GENERATING", "REVIEWING", "REVISING", "GENERATING", "REVIEWING", "PASSED"),
+                progressTypes(result));
+        assertEquals(List.of(1, 2), state.reviews.stream().map(ResumeOptimizationReviewDO::getIterationNo).toList());
+        assertTrue(state.reviews.get(1).getExecutorOutputJson().contains("Second draft"));
+
+        ArgumentCaptor<ResumeOptimizationSuggestionDO> suggestionCaptor =
+                ArgumentCaptor.forClass(ResumeOptimizationSuggestionDO.class);
+        verify(suggestionMapper).insert(suggestionCaptor.capture());
+        assertEquals("Built reliable Spring APIs with latency metrics", suggestionCaptor.getValue().getSuggestedText());
+        assertEquals(1, result.getSuggestions().size());
+        assertEquals("Built reliable Spring APIs with latency metrics", result.getSuggestions().get(0).getSuggestedText());
+    }
+
+    @Test
+    void reviewerRiskStopsIterationImmediately() {
+        setupCreateTaskMocks(
+                List.of(executorOutput()),
+                List.of(reviewerOutput(0.93D, true, List.of("Invented a Kubernetes migration"),
+                        List.of(), List.of("suggestion-1")))
+        );
+
+        CareerOptimizationTaskVO result = newService().createTask(createRequest());
+
+        verify(singleFlightLlmService, times(2)).chat(anyString(), anyString(), anyString(), any(ChatRequest.class));
+        assertEquals(CareerTaskStatus.NEEDS_REVIEW.name(), result.getStatus());
+        assertEquals(OptimizationReviewStatus.BLOCKED_BY_RISK.name(), result.getReviewStatus());
+        assertEquals(List.of("GENERATING", "REVIEWING", "NEEDS_REVIEW"), progressTypes(result));
     }
 
     @Test
@@ -261,6 +315,11 @@ class ResumeOptimizationReviewTest {
     }
 
     private CreateTaskState setupCreateTaskMocks(Map<String, Object> reviewerOutput) {
+        return setupCreateTaskMocks(List.of(executorOutput()), List.of(reviewerOutput));
+    }
+
+    private CreateTaskState setupCreateTaskMocks(List<Map<String, Object>> executorOutputs,
+                                                 List<Map<String, Object>> reviewerOutputs) {
         UserContext.set(LoginUser.builder().userId("user-1").username("alice").build());
         when(resumeVersionMapper.selectOne(anyResumeVersionWrapper())).thenReturn(ResumeVersionDO.builder()
                 .id("resume-1")
@@ -274,10 +333,28 @@ class ResumeOptimizationReviewTest {
                 .build());
         when(careerRetrievalEnhancementService.enhanceOptimization(any(ResumeVersionDO.class),
                 any(JobDescriptionDO.class), anyString())).thenReturn(defaultEnhancement());
+        AtomicInteger executorIndex = new AtomicInteger();
+        AtomicInteger reviewerIndex = new AtomicInteger();
         when(singleFlightLlmService.chat(anyString(), anyString(), anyString(), any(ChatRequest.class)))
-                .thenReturn("executor-response", "reviewer-response");
-        when(careerJsonParser.parseObject("executor-response")).thenReturn(executorOutput());
-        when(careerJsonParser.parseObject("reviewer-response")).thenReturn(reviewerOutput);
+                .thenAnswer(invocation -> {
+                    String scene = invocation.getArgument(0);
+                    if ("OPTIMIZATION_EXECUTOR".equals(scene)) {
+                        return "executor-response-" + executorIndex.incrementAndGet();
+                    }
+                    return "reviewer-response-" + reviewerIndex.incrementAndGet();
+                });
+        when(careerJsonParser.parseObject(anyString())).thenAnswer(invocation -> {
+            String response = invocation.getArgument(0);
+            if (response.startsWith("executor-response-")) {
+                int index = Integer.parseInt(response.substring("executor-response-".length())) - 1;
+                return executorOutputs.get(Math.min(index, executorOutputs.size() - 1));
+            }
+            if (response.startsWith("reviewer-response-")) {
+                int index = Integer.parseInt(response.substring("reviewer-response-".length())) - 1;
+                return reviewerOutputs.get(Math.min(index, reviewerOutputs.size() - 1));
+            }
+            return Map.of();
+        });
 
         CreateTaskState state = new CreateTaskState();
         doAnswer(invocation -> {
@@ -313,13 +390,17 @@ class ResumeOptimizationReviewTest {
     }
 
     private Map<String, Object> executorOutput() {
+        return executorOutput("ok", "Built reliable APIs");
+    }
+
+    private Map<String, Object> executorOutput(String summary, String suggestedText) {
         return Map.of(
-                "summary", "ok",
+                "summary", summary,
                 "suggestions", List.of(Map.of(
                         "category", "impact",
                         "title", "Improve wording",
                         "originalText", "Built APIs",
-                        "suggestedText", "Built reliable APIs",
+                        "suggestedText", suggestedText,
                         "reason", "Better signal",
                         "riskLevel", "LOW"
                 ))

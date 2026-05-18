@@ -80,6 +80,7 @@ public class ResumeOptimizationServiceImpl implements ResumeOptimizationService 
     private static final int RISK_LEVEL_MAX_LENGTH = 32;
     private static final int TASK_ERROR_MAX_LENGTH = 1000;
     private static final int EVENT_MESSAGE_MAX_LENGTH = 512;
+    private static final int MAX_OPTIMIZATION_ITERATIONS = 3;
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
@@ -96,6 +97,9 @@ public class ResumeOptimizationServiceImpl implements ResumeOptimizationService 
     private final ResumeOptimizationReviewEvaluator reviewEvaluator = new ResumeOptimizationReviewEvaluator();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    /**
+     * 创建简历优化任务，并通过执行者-裁判多轮迭代完成质量门禁。
+     */
     @Override
     public CareerOptimizationTaskVO createTask(CareerOptimizationCreateRequest request) {
         String userId = requireUserId();
@@ -135,45 +139,29 @@ public class ResumeOptimizationServiceImpl implements ResumeOptimizationService 
         task.setTraceId(traceId);
 
         try {
-            CareerProgressEventDO generatingEvent = persistProgressEvent(task.getId(), userId, "GENERATING",
-                    "Generating resume optimization suggestions", Map.of("traceId", traceId));
             CareerRetrievalEnhancement retrievalEnhancement =
                     careerRetrievalEnhancementService.enhanceOptimization(resumeVersion, job,
                             alignmentReport == null ? "{}" : writeJson(buildAlignmentReportPayload(alignmentReport),
                                     "Failed to serialize alignment report JSON"));
-            String prompt = buildPrompt(resumeVersion, job, alignmentReport, retrievalEnhancement);
-            String response = singleFlightLlmService.chat("OPTIMIZATION_EXECUTOR",
-                    buildSingleFlightKey("OPTIMIZATION_EXECUTOR", userId, task.getId(), prompt),
-                    traceId,
-                    ChatRequest.builder()
-                            .messages(List.of(ChatMessage.user(prompt)))
-                            .temperature(0.1D)
-                            .thinking(false)
-                            .build());
-            Map<String, Object> output = careerJsonParser.parseObject(response);
-            if (output == null) {
-                output = Map.of();
-            }
-
-            List<ResumeOptimizationSuggestionDO> suggestions = persistSuggestions(task.getId(), userId,
-                    output.get("suggestions"));
-            CareerProgressEventDO reviewingEvent = persistProgressEvent(task.getId(), userId, "REVIEWING",
-                    "Reviewing optimization quality and truthfulness", Map.of("traceId", traceId));
-            Map<String, Object> reviewerOutput =
-                    callReviewer(task, resumeVersion, job, alignmentReport, retrievalEnhancement, output);
-            ResumeOptimizationReviewDO review = persistReview(task, userId, output, reviewerOutput, suggestions);
+            List<CareerProgressEventDO> progressEvents = new ArrayList<>();
+            OptimizationIterationResult iterationResult = runOptimizationIterations(
+                    task, userId, resumeVersion, job, alignmentReport, retrievalEnhancement, progressEvents);
+            ResumeOptimizationReviewDO review = iterationResult.review();
             CareerTaskStatus finalTaskStatus = toTaskStatus(review);
             CareerProgressEventDO finalEvent = persistProgressEvent(task.getId(), userId,
                     finalTaskStatus == CareerTaskStatus.SUCCESS ? "PASSED" : "NEEDS_REVIEW",
                     "Resume optimization review " + review.getStatus(),
-                    buildProgressPayload(review, traceId));
+                    buildProgressPayload(review, traceId, iterationResult.iterationNo()));
+            progressEvents.add(finalEvent);
             task.setStatus(finalTaskStatus.name());
-            task.setOutputJson(writeJson(output, "Failed to serialize optimization output JSON"));
+            task.setOutputJson(writeJson(buildTaskOutput(iterationResult.executorOutput(), review,
+                    iterationResult.iterationNo(), finalTaskStatus),
+                    "Failed to serialize optimization output JSON"));
             task.setErrorMessage(null);
             task.setUpdatedBy(userId);
             taskMapper.updateById(task);
 
-            return toTaskVO(task, output, suggestions, review, List.of(generatingEvent, reviewingEvent, finalEvent));
+            return toTaskVO(task, iterationResult.executorOutput(), iterationResult.suggestions(), review, progressEvents);
         } catch (RuntimeException ex) {
             try {
                 markTaskFailed(task, userId, ex);
@@ -377,15 +365,118 @@ public class ResumeOptimizationServiceImpl implements ResumeOptimizationService 
                                JobDescriptionDO job,
                                JobAlignmentReportDO alignmentReport,
                                CareerRetrievalEnhancement retrievalEnhancement) {
+        return buildPrompt(resumeVersion, job, alignmentReport, retrievalEnhancement, null);
+    }
+
+    /**
+     * 构建执行者提示词，并追加上一轮裁判修改意见驱动下一轮优化。
+     */
+    private String buildPrompt(ResumeVersionDO resumeVersion,
+                               JobDescriptionDO job,
+                               JobAlignmentReportDO alignmentReport,
+                               CareerRetrievalEnhancement retrievalEnhancement,
+                               Map<String, Object> previousReviewerOutput) {
         String alignmentJson = alignmentReport == null
                 ? "{}"
                 : writeJson(buildAlignmentReportPayload(alignmentReport), "Failed to serialize alignment report JSON");
-        return appendRetrievalEvidence(String.format(
+        String prompt = String.format(
                 CareerPromptTemplates.RESUME_OPTIMIZE,
                 defaultJson(resumeVersion.getContentJson()),
                 job == null ? "{}" : defaultJson(job.getParsedJson()),
                 alignmentJson
-        ), retrievalEnhancement);
+        );
+        if (previousReviewerOutput != null && !previousReviewerOutput.isEmpty()) {
+            prompt = prompt + "\n\n上一轮裁判修改意见 JSON：\n"
+                    + writeJson(buildRevisionPayload(previousReviewerOutput),
+                    "Failed to serialize optimization revision instructions JSON")
+                    + "\n请只修正被裁判指出的问题，不要编造原始简历中不存在的经历。";
+        }
+        return appendRetrievalEvidence(prompt, retrievalEnhancement);
+    }
+
+    /**
+     * 调用执行者 Agent 生成本轮简历优化建议。
+     */
+    private Map<String, Object> callExecutor(ResumeOptimizationTaskDO task,
+                                             ResumeVersionDO resumeVersion,
+                                             JobDescriptionDO job,
+                                             JobAlignmentReportDO alignmentReport,
+                                             CareerRetrievalEnhancement retrievalEnhancement,
+                                             Map<String, Object> previousReviewerOutput,
+                                             int iterationNo) {
+        String prompt = buildPrompt(resumeVersion, job, alignmentReport, retrievalEnhancement, previousReviewerOutput);
+        String response = singleFlightLlmService.chat("OPTIMIZATION_EXECUTOR",
+                buildSingleFlightKey("OPTIMIZATION_EXECUTOR", task.getUserId(), task.getId(),
+                        iterationNo + ":" + prompt),
+                task.getTraceId(),
+                ChatRequest.builder()
+                        .messages(List.of(ChatMessage.user(prompt)))
+                        .temperature(0.1D)
+                        .thinking(false)
+                        .build());
+        Map<String, Object> output = careerJsonParser.parseObject(response);
+        return output == null ? Map.of() : output;
+    }
+
+    /**
+     * 运行 JobNavigator 的多轮执行者-裁判优化闭环。
+     */
+    private OptimizationIterationResult runOptimizationIterations(ResumeOptimizationTaskDO task,
+                                                                 String userId,
+                                                                 ResumeVersionDO resumeVersion,
+                                                                 JobDescriptionDO job,
+                                                                 JobAlignmentReportDO alignmentReport,
+                                                                 CareerRetrievalEnhancement retrievalEnhancement,
+                                                                 List<CareerProgressEventDO> progressEvents) {
+        Map<String, Object> previousReviewerOutput = null;
+        Map<String, Object> finalOutput = Map.of();
+        ResumeOptimizationReviewDO finalReview = null;
+        int finalIterationNo = 1;
+        for (int iterationNo = 1; iterationNo <= MAX_OPTIMIZATION_ITERATIONS; iterationNo++) {
+            progressEvents.add(persistProgressEvent(task.getId(), userId, "GENERATING",
+                    "Generating resume optimization suggestions, iteration " + iterationNo,
+                    Map.of("traceId", task.getTraceId(), "iterationNo", iterationNo)));
+            Map<String, Object> output = callExecutor(task, resumeVersion, job, alignmentReport,
+                    retrievalEnhancement, previousReviewerOutput, iterationNo);
+            progressEvents.add(persistProgressEvent(task.getId(), userId, "REVIEWING",
+                    "Reviewing optimization quality and truthfulness, iteration " + iterationNo,
+                    Map.of("traceId", task.getTraceId(), "iterationNo", iterationNo)));
+            Map<String, Object> reviewerOutput =
+                    callReviewer(task, resumeVersion, job, alignmentReport, retrievalEnhancement, output);
+            List<ResumeOptimizationSuggestionDO> reviewSuggestions = buildSuggestionDrafts(task.getId(), userId,
+                    output.get("suggestions"));
+            ResumeOptimizationReviewDO review = persistReview(task, userId, iterationNo, output,
+                    reviewerOutput, reviewSuggestions);
+
+            finalOutput = output;
+            finalReview = review;
+            finalIterationNo = iterationNo;
+            OptimizationReviewStatus status = OptimizationReviewStatus.valueOf(review.getStatus());
+            if (status == OptimizationReviewStatus.PASSED || status == OptimizationReviewStatus.BLOCKED_BY_RISK
+                    || iterationNo == MAX_OPTIMIZATION_ITERATIONS) {
+                break;
+            }
+            previousReviewerOutput = reviewerOutput;
+            progressEvents.add(persistProgressEvent(task.getId(), userId, "REVISING",
+                    "Reviewer requested another executor iteration",
+                    buildProgressPayload(review, task.getTraceId(), iterationNo)));
+        }
+        List<ResumeOptimizationSuggestionDO> suggestions = persistSuggestions(task.getId(), userId,
+                finalOutput.get("suggestions"));
+        return new OptimizationIterationResult(finalOutput, suggestions, finalReview, finalIterationNo);
+    }
+
+    /**
+     * 提取裁判输出中用于驱动下一轮执行者修订的信息。
+     */
+    private Map<String, Object> buildRevisionPayload(Map<String, Object> reviewerOutput) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("qualityScore", reviewerOutput.get("qualityScore"));
+        payload.put("acceptedSuggestionIds", reviewerOutput.get("acceptedSuggestionIds"));
+        payload.put("rejectedSuggestionIds", reviewerOutput.get("rejectedSuggestionIds"));
+        payload.put("revisionInstructions", reviewerOutput.get("revisionInstructions"));
+        payload.put("riskSummary", reviewerOutput.get("riskSummary"));
+        return payload;
     }
 
     private Map<String, Object> callReviewer(ResumeOptimizationTaskDO task,
@@ -433,24 +524,13 @@ public class ResumeOptimizationServiceImpl implements ResumeOptimizationService 
         return payload;
     }
 
+    /**
+     * 将最终通过或最终停留轮次的建议落库为用户可决策项。
+     */
     private List<ResumeOptimizationSuggestionDO> persistSuggestions(String taskId, String userId, Object suggestionsValue) {
         List<ResumeOptimizationSuggestionDO> persisted = new ArrayList<>();
         try {
-            for (Object item : toObjectList(suggestionsValue)) {
-                if (!(item instanceof Map<?, ?> suggestionMap)) {
-                    continue;
-                }
-                ResumeOptimizationSuggestionDO suggestion = ResumeOptimizationSuggestionDO.builder()
-                        .taskId(taskId)
-                        .userId(userId)
-                        .category(limitText(extractString(suggestionMap.get("category")), CATEGORY_MAX_LENGTH))
-                        .title(limitText(extractString(suggestionMap.get("title")), TITLE_MAX_LENGTH))
-                        .originalText(extractString(suggestionMap.get("originalText")))
-                        .suggestedText(extractString(suggestionMap.get("suggestedText")))
-                        .reason(extractString(suggestionMap.get("reason")))
-                        .riskLevel(limitText(extractString(suggestionMap.get("riskLevel")), RISK_LEVEL_MAX_LENGTH))
-                        .status(ResumeSuggestionStatus.PENDING.name())
-                        .build();
+            for (ResumeOptimizationSuggestionDO suggestion : buildSuggestionDrafts(taskId, userId, suggestionsValue)) {
                 suggestionMapper.insert(suggestion);
                 persisted.add(suggestion);
             }
@@ -459,6 +539,32 @@ public class ResumeOptimizationServiceImpl implements ResumeOptimizationService 
             throw ex;
         }
         return persisted;
+    }
+
+    /**
+     * 将执行者输出转换为建议草稿，供裁判评分和最终落库共用。
+     */
+    private List<ResumeOptimizationSuggestionDO> buildSuggestionDrafts(String taskId,
+                                                                       String userId,
+                                                                       Object suggestionsValue) {
+        List<ResumeOptimizationSuggestionDO> drafts = new ArrayList<>();
+        for (Object item : toObjectList(suggestionsValue)) {
+            if (!(item instanceof Map<?, ?> suggestionMap)) {
+                continue;
+            }
+            drafts.add(ResumeOptimizationSuggestionDO.builder()
+                    .taskId(taskId)
+                    .userId(userId)
+                    .category(limitText(extractString(suggestionMap.get("category")), CATEGORY_MAX_LENGTH))
+                    .title(limitText(extractString(suggestionMap.get("title")), TITLE_MAX_LENGTH))
+                    .originalText(extractString(suggestionMap.get("originalText")))
+                    .suggestedText(extractString(suggestionMap.get("suggestedText")))
+                    .reason(extractString(suggestionMap.get("reason")))
+                    .riskLevel(limitText(extractString(suggestionMap.get("riskLevel")), RISK_LEVEL_MAX_LENGTH))
+                    .status(ResumeSuggestionStatus.PENDING.name())
+                    .build());
+        }
+        return drafts;
     }
 
     private void deletePersistedSuggestions(List<ResumeOptimizationSuggestionDO> suggestions, RuntimeException cause) {
@@ -474,8 +580,12 @@ public class ResumeOptimizationServiceImpl implements ResumeOptimizationService 
         }
     }
 
+    /**
+     * 持久化单轮执行者输出和裁判评审结果。
+     */
     private ResumeOptimizationReviewDO persistReview(ResumeOptimizationTaskDO task,
                                                      String userId,
+                                                     int iterationNo,
                                                      Map<String, Object> output,
                                                      Map<String, Object> reviewerOutput,
                                                      List<ResumeOptimizationSuggestionDO> suggestions) {
@@ -483,7 +593,7 @@ public class ResumeOptimizationServiceImpl implements ResumeOptimizationService 
         ResumeOptimizationReviewDO review = ResumeOptimizationReviewDO.builder()
                 .taskId(task.getId())
                 .userId(userId)
-                .iterationNo(1)
+                .iterationNo(iterationNo)
                 .executorOutputJson(writeJson(output, "Failed to serialize optimization review executor JSON"))
                 .reviewerOutputJson(writeJson(reviewerOutput, "Failed to serialize optimization reviewer JSON"))
                 .qualityScore(BigDecimal.valueOf(decision.qualityScore()))
@@ -504,13 +614,38 @@ public class ResumeOptimizationServiceImpl implements ResumeOptimizationService 
                 : CareerTaskStatus.NEEDS_REVIEW;
     }
 
+    /**
+     * 构建任务输出，记录最终轮执行者结果和多轮评审摘要。
+     */
+    private Map<String, Object> buildTaskOutput(Map<String, Object> output,
+                                                ResumeOptimizationReviewDO review,
+                                                int iterationNo,
+                                                CareerTaskStatus taskStatus) {
+        Map<String, Object> payload = new LinkedHashMap<>(output == null ? Map.of() : output);
+        payload.put("finalIterationNo", iterationNo);
+        payload.put("reviewStatus", review == null ? null : review.getStatus());
+        payload.put("taskStatus", taskStatus.name());
+        payload.put("maxIterationNo", MAX_OPTIMIZATION_ITERATIONS);
+        return payload;
+    }
+
     private Map<String, Object> buildProgressPayload(ResumeOptimizationReviewDO review, String traceId) {
+        return buildProgressPayload(review, traceId, review == null ? null : review.getIterationNo());
+    }
+
+    /**
+     * 构建进度事件负载，带上轮次和裁判评分信息。
+     */
+    private Map<String, Object> buildProgressPayload(ResumeOptimizationReviewDO review,
+                                                     String traceId,
+                                                     Integer iterationNo) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("traceId", traceId);
-        payload.put("reviewId", review.getId());
-        payload.put("reviewStatus", review.getStatus());
-        payload.put("qualityScore", review.getQualityScore());
-        payload.put("truthfulnessRisk", review.getTruthfulnessRisk());
+        payload.put("iterationNo", iterationNo);
+        payload.put("reviewId", review == null ? null : review.getId());
+        payload.put("reviewStatus", review == null ? null : review.getStatus());
+        payload.put("qualityScore", review == null ? null : review.getQualityScore());
+        payload.put("truthfulnessRisk", review == null ? null : review.getTruthfulnessRisk());
         return payload;
     }
 
@@ -844,5 +979,11 @@ public class ResumeOptimizationServiceImpl implements ResumeOptimizationService 
             throw new ClientException("User information is missing");
         }
         return userId;
+    }
+
+    private record OptimizationIterationResult(Map<String, Object> executorOutput,
+                                                List<ResumeOptimizationSuggestionDO> suggestions,
+                                                ResumeOptimizationReviewDO review,
+                                                int iterationNo) {
     }
 }
