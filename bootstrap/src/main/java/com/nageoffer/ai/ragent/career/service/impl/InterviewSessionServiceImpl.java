@@ -36,6 +36,9 @@ import com.nageoffer.ai.ragent.career.dao.mapper.ResumeVersionMapper;
 import com.nageoffer.ai.ragent.career.enums.InterviewSessionStatus;
 import com.nageoffer.ai.ragent.career.enums.InterviewTurnType;
 import com.nageoffer.ai.ragent.career.service.InterviewSessionService;
+import com.nageoffer.ai.ragent.career.service.followup.InterviewFollowUpDecision;
+import com.nageoffer.ai.ragent.career.service.followup.InterviewFollowUpDecisionRequest;
+import com.nageoffer.ai.ragent.career.service.followup.InterviewFollowUpDecisionService;
 import com.nageoffer.ai.ragent.career.service.parser.CareerJsonParser;
 import com.nageoffer.ai.ragent.career.service.recovery.InterviewSessionRecoveryService;
 import com.nageoffer.ai.ragent.career.service.prompt.CareerPromptTemplates;
@@ -78,6 +81,7 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
     private final InterviewTurnRuntimeService interviewTurnRuntimeService;
     private final InterviewSessionRecoveryService interviewSessionRecoveryService;
     private final CareerRetrievalEnhancementService careerRetrievalEnhancementService;
+    private final InterviewFollowUpDecisionService interviewFollowUpDecisionService;
     private final PlatformTransactionManager transactionManager;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -302,6 +306,9 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
         return turn;
     }
 
+    /**
+     * 创建追问轮次，并初始化为可作答状态。
+     */
     private InterviewTurnDO createFollowUpTurn(InterviewSessionDO session,
                                                InterviewTurnDO currentTurn,
                                                String followUpQuestion,
@@ -405,20 +412,29 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
     }
 
     /**
-     * 根据评分结果创建追问、下一道主问题，或将会话推进到完成状态。
+     * 根据显式追问规则链的决策创建追问、下一道主问题，或将会话推进到完成状态。
      */
     private void advanceAfterEvaluation(InterviewSessionDO session,
                                         InterviewTurnDO currentTurn,
                                         EvaluationResult evaluation,
                                         String userId) {
         interviewTurnRuntimeService.markFollowUpDeciding(currentTurn);
-        if (evaluation.followUpRequired()) {
-            InterviewTurnDO followUp = createFollowUpTurn(session, currentTurn, evaluation.followUpQuestion(), userId);
+        List<InterviewTurnDO> sessionTurns = listSessionTurns(session.getId());
+        InterviewFollowUpDecision followUpDecision = interviewFollowUpDecisionService.decide(
+                new InterviewFollowUpDecisionRequest(
+                        currentTurn,
+                        sessionTurns,
+                        evaluation.score(),
+                        evaluation.feedback(),
+                        evaluation.followUpRequired(),
+                        evaluation.followUpQuestion()));
+        if (followUpDecision.required()) {
+            InterviewTurnDO followUp = createFollowUpTurn(session, currentTurn, followUpDecision.question(), userId);
             session.setCurrentTurnNo(followUp.getTurnNo());
             interviewTurnRuntimeService.markFollowUpCreated(currentTurn);
             return;
         }
-        int nextPlanIndex = nextPlannedQuestionIndex(session.getId());
+        int nextPlanIndex = nextPlannedQuestionIndex(sessionTurns);
         List<Map<String, Object>> questions = readQuestions(readPlan(session.getPlanJson()));
         if (nextPlanIndex <= questions.size()) {
             InterviewTurnDO next = createPlannedTurn(session, questions.get(nextPlanIndex - 1),
@@ -460,11 +476,16 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
         return new EvaluationResult(score, feedback, followUpRequired, followUpQuestion);
     }
 
+    /**
+     * 从评分模型输出中提取反馈字段，供报告展示和追问规则链使用。
+     */
     private Map<String, Object> buildFeedback(Map<String, Object> parsed) {
         Map<String, Object> feedback = new LinkedHashMap<>();
         feedback.put("summary", extractString(parsed.get("feedback")));
         feedback.put("strengths", toList(parsed.get("strengths")));
         feedback.put("weaknesses", toList(parsed.get("weaknesses")));
+        feedback.put("missingPoints", toList(parsed.get("missingPoints")));
+        feedback.put("risks", toList(parsed.get("risks")));
         return feedback;
     }
 
@@ -593,11 +614,21 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
         return turns == null ? List.of() : turns;
     }
 
-    private int nextPlannedQuestionIndex(String sessionId) {
+    /**
+     * 查询会话内所有未删除轮次，供追问决策和主问题推进复用。
+     */
+    private List<InterviewTurnDO> listSessionTurns(String sessionId) {
         List<InterviewTurnDO> turns = turnMapper.selectList(Wrappers.lambdaQuery(InterviewTurnDO.class)
                 .eq(InterviewTurnDO::getSessionId, sessionId)
                 .eq(InterviewTurnDO::getDeleted, 0)
                 .orderByAsc(InterviewTurnDO::getTurnNo));
+        return turns == null ? List.of() : turns;
+    }
+
+    /**
+     * 根据已创建的非追问轮次数量计算下一道计划主问题的序号。
+     */
+    private int nextPlannedQuestionIndex(List<InterviewTurnDO> turns) {
         if (turns == null) {
             return 1;
         }

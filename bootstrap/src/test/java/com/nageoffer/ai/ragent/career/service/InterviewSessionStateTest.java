@@ -34,6 +34,7 @@ import com.nageoffer.ai.ragent.career.dao.mapper.InterviewTurnMapper;
 import com.nageoffer.ai.ragent.career.dao.mapper.JobDescriptionMapper;
 import com.nageoffer.ai.ragent.career.dao.mapper.ResumeVersionMapper;
 import com.nageoffer.ai.ragent.career.enums.InterviewSessionStatus;
+import com.nageoffer.ai.ragent.career.service.followup.DefaultInterviewFollowUpDecisionService;
 import com.nageoffer.ai.ragent.career.service.impl.InterviewSessionServiceImpl;
 import com.nageoffer.ai.ragent.career.service.parser.CareerJsonParser;
 import com.nageoffer.ai.ragent.career.service.recovery.InterviewSessionRecoveryService;
@@ -247,6 +248,30 @@ class InterviewSessionStateTest {
         assertEquals("EVALUATED", second.getStatus());
         assertEquals(2, turns.size());
         assertEquals("COMPLETED", sessions.get(0).getStatus());
+        assertEquals(2, sessions.get(0).getCurrentTurnNo());
+    }
+
+    /**
+     * 验证面试评分低且模型未给追问问题时，提交答案仍会通过规则链创建兜底追问。
+     */
+    @Test
+    void submitAnswerCreatesFallbackFollowUpWhenScoreIsLowWithoutLlmQuestion() {
+        login();
+        stubVisibleLinkedObjects(true, true);
+        stubPersistence();
+        seedSessionWithAskedTurn();
+        stubRetrievalEnhancement();
+        when(singleFlightLlmService.chat(anyString(), anyString(), any(), any(ChatRequest.class)))
+                .thenReturn("{\"score\":55}");
+        when(careerJsonParser.parseObject(anyString())).thenReturn(lowScoreEvaluation());
+
+        CareerInterviewTurnVO result = newService().submitAnswer("session-1", answer("I missed some details."));
+
+        assertEquals("EVALUATED", result.getStatus());
+        assertEquals("FOLLOW_UP_CREATED", result.getFollowUpDecisionStatus());
+        assertEquals(2, turns.size());
+        assertEquals("FOLLOW_UP", turns.get(1).getTurnType());
+        assertEquals("能否再补充一个关键细节，说明你的思路或取舍？", turns.get(1).getQuestion());
         assertEquals(2, sessions.get(0).getCurrentTurnNo());
     }
 
@@ -483,6 +508,7 @@ class InterviewSessionStateTest {
                 new InterviewTurnRuntimeServiceImpl(),
                 interviewSessionRecoveryService,
                 careerRetrievalEnhancementService,
+                new DefaultInterviewFollowUpDecisionService(),
                 transactionManager
         );
     }
@@ -693,6 +719,18 @@ class InterviewSessionStateTest {
         result.put("weaknesses", List.of());
         result.put("followUpRequired", followUpRequired);
         result.put("followUpQuestion", followUpQuestion);
+        return result;
+    }
+
+    // 构造低分且没有 LLM 追问问题的评分结果，验证规则链兜底追问。
+    private Map<String, Object> lowScoreEvaluation() {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("score", 55);
+        result.put("feedback", "Needs more detail");
+        result.put("strengths", List.of());
+        result.put("weaknesses", List.of());
+        result.put("followUpRequired", false);
+        result.put("followUpQuestion", null);
         return result;
     }
 

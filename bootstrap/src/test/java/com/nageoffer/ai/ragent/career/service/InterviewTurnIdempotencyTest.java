@@ -32,6 +32,7 @@ import com.nageoffer.ai.ragent.career.dao.mapper.InterviewTurnMapper;
 import com.nageoffer.ai.ragent.career.dao.mapper.JobDescriptionMapper;
 import com.nageoffer.ai.ragent.career.dao.mapper.ResumeVersionMapper;
 import com.nageoffer.ai.ragent.career.service.impl.InterviewSessionServiceImpl;
+import com.nageoffer.ai.ragent.career.service.followup.DefaultInterviewFollowUpDecisionService;
 import com.nageoffer.ai.ragent.career.service.parser.CareerJsonParser;
 import com.nageoffer.ai.ragent.career.service.recovery.InterviewSessionRecoveryService;
 import com.nageoffer.ai.ragent.career.service.runtime.InterviewTurnRuntimeServiceImpl;
@@ -181,6 +182,7 @@ class InterviewTurnIdempotencyTest {
                 new InterviewTurnRuntimeServiceImpl(),
                 interviewSessionRecoveryService,
                 careerRetrievalEnhancementService,
+                new DefaultInterviewFollowUpDecisionService(),
                 transactionManager
         );
     }
