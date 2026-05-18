@@ -52,6 +52,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -62,6 +66,8 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -93,6 +99,9 @@ class InterviewTurnIdempotencyTest {
 
     @Mock
     private CareerRetrievalEnhancementService careerRetrievalEnhancementService;
+
+    @Mock
+    private PlatformTransactionManager transactionManager;
 
     private final List<InterviewSessionDO> sessions = new ArrayList<>();
     private final List<InterviewTurnDO> turns = new ArrayList<>();
@@ -171,7 +180,8 @@ class InterviewTurnIdempotencyTest {
                 singleFlightLlmService,
                 new InterviewTurnRuntimeServiceImpl(),
                 interviewSessionRecoveryService,
-                careerRetrievalEnhancementService
+                careerRetrievalEnhancementService,
+                transactionManager
         );
     }
 
@@ -228,11 +238,16 @@ class InterviewTurnIdempotencyTest {
         }).when(turnMapper).insert(any(InterviewTurnDO.class));
         lenient().doAnswer(invocation -> 1).when(sessionMapper).updateById(any(InterviewSessionDO.class));
         lenient().doAnswer(invocation -> 1).when(turnMapper).updateById(any(InterviewTurnDO.class));
+        lenient().doAnswer(invocation -> 1).when(turnMapper).update(isNull(), anyTurnWrapper());
         lenient().when(sessionMapper.selectOne(anySessionWrapper()))
                 .thenAnswer(invocation -> selectSession(invocation.getArgument(0)));
         lenient().when(turnMapper.selectOne(anyTurnWrapper()))
                 .thenAnswer(invocation -> selectTurn(invocation.getArgument(0)));
         lenient().when(turnMapper.selectList(anyTurnWrapper())).thenAnswer(invocation -> List.copyOf(turns));
+        lenient().when(transactionManager.getTransaction(any(TransactionDefinition.class)))
+                .thenReturn(new SimpleTransactionStatus());
+        lenient().doAnswer(invocation -> null).when(transactionManager).commit(any(TransactionStatus.class));
+        lenient().doAnswer(invocation -> null).when(transactionManager).rollback(any(TransactionStatus.class));
     }
 
     private void seedRunningSession() {

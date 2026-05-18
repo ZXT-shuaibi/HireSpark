@@ -32,6 +32,16 @@ public interface InterviewSessionService {
 
     CareerInterviewTurnVO submitAnswer(String sessionId, CareerInterviewAnswerRequest request);
 
+    /**
+     * 重试指定轮次的面试评分，复用已保存的答案继续推进面试流程。
+     */
+    CareerInterviewTurnVO retryEvaluation(String sessionId, Integer turnNo);
+
+    /**
+     * 批量补偿待重试的面试评分轮次，供后台 worker 调度使用。
+     */
+    int compensatePendingEvaluations(int limit);
+
     void pause(String sessionId);
 
     void finish(String sessionId);

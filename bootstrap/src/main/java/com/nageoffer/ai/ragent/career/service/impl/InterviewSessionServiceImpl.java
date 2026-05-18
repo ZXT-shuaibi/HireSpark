@@ -49,8 +49,11 @@ import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
 import com.nageoffer.ai.ragent.framework.exception.ClientException;
 import com.nageoffer.ai.ragent.framework.exception.ServiceException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -59,6 +62,7 @@ import java.util.Locale;
 import java.util.Map;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class InterviewSessionServiceImpl implements InterviewSessionService {
 
@@ -74,6 +78,7 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
     private final InterviewTurnRuntimeService interviewTurnRuntimeService;
     private final InterviewSessionRecoveryService interviewSessionRecoveryService;
     private final CareerRetrievalEnhancementService careerRetrievalEnhancementService;
+    private final PlatformTransactionManager transactionManager;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     @Transactional(rollbackFor = Exception.class)
@@ -193,46 +198,60 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
         session.setUpdatedBy(userId);
         sessionMapper.updateById(session);
 
-        EvaluationResult evaluation;
-        try {
-            interviewTurnRuntimeService.markEvaluating(currentTurn);
-            turnMapper.updateById(currentTurn);
-            evaluation = evaluateAnswer(session, currentTurn, answer, userId);
-        } catch (RuntimeException ex) {
-            interviewTurnRuntimeService.markEvaluationFailed(currentTurn, ex);
-            turnMapper.updateById(currentTurn);
-            interviewSessionRecoveryService.snapshotStableState(session, userId, stepIdempotencyKey);
-            return toTurnVO(currentTurn);
+        return evaluateSavedAnswerAndAdvance(session, currentTurn, userId, false);
+    }
+
+    /**
+     * 重试指定轮次的评分，复用已经保存的候选人答案。
+     */
+    @Override
+    public CareerInterviewTurnVO retryEvaluation(String sessionId, Integer turnNo) {
+        String userId = requireUserId();
+        return retryEvaluationForUser(sessionId, turnNo, userId, true);
+    }
+
+    /**
+     * 按用户维度重试指定轮次评分，供手动重试和后台补偿共用。
+     */
+    private CareerInterviewTurnVO retryEvaluationForUser(String sessionId,
+                                                         Integer turnNo,
+                                                         String userId,
+                                                         boolean compensation) {
+        InterviewSessionDO session = requireSession(sessionId, userId);
+        ensureLinkedObjectsVisible(session, userId);
+        if (parseSessionStatus(session.getStatus()).terminal()) {
+            throw new ClientException("Interview session is already completed");
         }
+        InterviewTurnDO turn = requireTurn(session.getId(), userId, turnNo);
+        requireRetryableTurn(turn);
+        return evaluateSavedAnswerAndAdvance(session, turn, userId, compensation);
+    }
 
-        currentTurn.setScore(evaluation.score());
-        currentTurn.setFeedbackJson(writeJson(evaluation.feedback(), "Failed to serialize interview feedback JSON"));
-        interviewTurnRuntimeService.markEvaluated(currentTurn);
-        turnMapper.updateById(currentTurn);
-
-        interviewTurnRuntimeService.markFollowUpDeciding(currentTurn);
-        if (evaluation.followUpRequired()) {
-            InterviewTurnDO followUp = createFollowUpTurn(session, currentTurn, evaluation.followUpQuestion(), userId);
-            session.setCurrentTurnNo(followUp.getTurnNo());
-            interviewTurnRuntimeService.markFollowUpCreated(currentTurn);
-        } else {
-            int nextPlanIndex = nextPlannedQuestionIndex(session.getId());
-            List<Map<String, Object>> questions = readQuestions(readPlan(session.getPlanJson()));
-            if (nextPlanIndex <= questions.size()) {
-                InterviewTurnDO next = createPlannedTurn(session, questions.get(nextPlanIndex - 1),
-                        nextTurnNo(session.getId()), userId);
-                session.setCurrentTurnNo(next.getTurnNo());
-                interviewTurnRuntimeService.markNextMainCreated(currentTurn);
-            } else {
-                session.setStatus(InterviewSessionStatus.COMPLETED.name());
-                interviewTurnRuntimeService.markSessionCompleted(currentTurn);
+    /**
+     * 扫描待补偿评分的轮次，并复用原答案自动重试评分。
+     */
+    @Override
+    public int compensatePendingEvaluations(int limit) {
+        int compensated = 0;
+        for (InterviewTurnDO turn : listCompensatingTurns(limit)) {
+            if (!isRetryableTurn(turn)) {
+                continue;
+            }
+            try {
+                CareerInterviewTurnVO result = retryEvaluationForUser(
+                        turn.getSessionId(), turn.getTurnNo(), turn.getUserId(), true);
+                if ("EVALUATED".equals(result.getStatus())) {
+                    compensated++;
+                }
+            } catch (ClientException ignored) {
+                log.debug("面试轮次已被其他流程抢占，跳过补偿：sessionId={}, turnNo={}",
+                        turn.getSessionId(), turn.getTurnNo());
+            } catch (RuntimeException ex) {
+                log.warn("补偿面试评分时发生异常，已跳过当前轮次：sessionId={}, turnNo={}",
+                        turn.getSessionId(), turn.getTurnNo(), ex);
             }
         }
-        turnMapper.updateById(currentTurn);
-        session.setUpdatedBy(userId);
-        sessionMapper.updateById(session);
-        interviewSessionRecoveryService.snapshotStableState(session, userId, stepIdempotencyKey);
-        return toTurnVO(currentTurn, evaluation.feedback());
+        return compensated;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -301,6 +320,115 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
         interviewTurnRuntimeService.initializeAskedTurn(followUp);
         turnMapper.insert(followUp);
         return followUp;
+    }
+
+    /**
+     * 对已保存答案执行评分，并根据评分结果推进追问、下一题或完成态。
+     */
+    private CareerInterviewTurnVO evaluateSavedAnswerAndAdvance(InterviewSessionDO session,
+                                                                InterviewTurnDO currentTurn,
+                                                                String userId,
+                                                                boolean compensation) {
+        String stepIdempotencyKey = currentTurn.getStepIdempotencyKey();
+        if (compensation) {
+            claimRetryTurn(currentTurn);
+        } else {
+            interviewTurnRuntimeService.markEvaluating(currentTurn);
+            turnMapper.updateById(currentTurn);
+        }
+        EvaluationResult evaluation;
+        try {
+            evaluation = evaluateAnswer(session, currentTurn, currentTurn.getAnswer(), userId);
+        } catch (RuntimeException ex) {
+            persistEvaluationFailure(session, currentTurn, userId, stepIdempotencyKey, ex, compensation);
+            return toTurnVO(currentTurn);
+        }
+
+        persistEvaluationSuccess(session, currentTurn, evaluation, userId, stepIdempotencyKey, compensation);
+        return toTurnVO(currentTurn, evaluation.feedback());
+    }
+
+    /**
+     * 持久化评分失败状态，补偿路径使用短事务避免长时间占用连接。
+     */
+    private void persistEvaluationFailure(InterviewSessionDO session,
+                                          InterviewTurnDO currentTurn,
+                                          String userId,
+                                          String stepIdempotencyKey,
+                                          RuntimeException ex,
+                                          boolean compensation) {
+        Runnable persistence = () -> {
+            interviewTurnRuntimeService.markEvaluationFailed(currentTurn, ex);
+            turnMapper.updateById(currentTurn);
+            interviewSessionRecoveryService.snapshotStableState(session, userId, stepIdempotencyKey);
+        };
+        executePersistence(persistence, compensation);
+    }
+
+    /**
+     * 持久化评分成功结果，并推进追问、下一题或完成状态。
+     */
+    private void persistEvaluationSuccess(InterviewSessionDO session,
+                                          InterviewTurnDO currentTurn,
+                                          EvaluationResult evaluation,
+                                          String userId,
+                                          String stepIdempotencyKey,
+                                          boolean compensation) {
+        Runnable persistence = () -> {
+            currentTurn.setScore(evaluation.score());
+            currentTurn.setFeedbackJson(writeJson(evaluation.feedback(), "Failed to serialize interview feedback JSON"));
+            if (compensation) {
+                interviewTurnRuntimeService.markEvaluationCompensated(currentTurn);
+            } else {
+                interviewTurnRuntimeService.markEvaluated(currentTurn);
+            }
+            turnMapper.updateById(currentTurn);
+
+            advanceAfterEvaluation(session, currentTurn, evaluation, userId);
+            turnMapper.updateById(currentTurn);
+            session.setUpdatedBy(userId);
+            sessionMapper.updateById(session);
+            interviewSessionRecoveryService.snapshotStableState(session, userId, stepIdempotencyKey);
+        };
+        executePersistence(persistence, compensation);
+    }
+
+    /**
+     * 根据调用来源选择直接持久化或短事务持久化。
+     */
+    private void executePersistence(Runnable persistence, boolean useShortTransaction) {
+        if (!useShortTransaction) {
+            persistence.run();
+            return;
+        }
+        new TransactionTemplate(transactionManager).executeWithoutResult(status -> persistence.run());
+    }
+
+    /**
+     * 根据评分结果创建追问、下一道主问题，或将会话推进到完成状态。
+     */
+    private void advanceAfterEvaluation(InterviewSessionDO session,
+                                        InterviewTurnDO currentTurn,
+                                        EvaluationResult evaluation,
+                                        String userId) {
+        interviewTurnRuntimeService.markFollowUpDeciding(currentTurn);
+        if (evaluation.followUpRequired()) {
+            InterviewTurnDO followUp = createFollowUpTurn(session, currentTurn, evaluation.followUpQuestion(), userId);
+            session.setCurrentTurnNo(followUp.getTurnNo());
+            interviewTurnRuntimeService.markFollowUpCreated(currentTurn);
+            return;
+        }
+        int nextPlanIndex = nextPlannedQuestionIndex(session.getId());
+        List<Map<String, Object>> questions = readQuestions(readPlan(session.getPlanJson()));
+        if (nextPlanIndex <= questions.size()) {
+            InterviewTurnDO next = createPlannedTurn(session, questions.get(nextPlanIndex - 1),
+                    nextTurnNo(session.getId()), userId);
+            session.setCurrentTurnNo(next.getTurnNo());
+            interviewTurnRuntimeService.markNextMainCreated(currentTurn);
+        } else {
+            session.setStatus(InterviewSessionStatus.COMPLETED.name());
+            interviewTurnRuntimeService.markSessionCompleted(currentTurn);
+        }
     }
 
     private EvaluationResult evaluateAnswer(InterviewSessionDO session,
@@ -405,6 +533,64 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
             return null;
         }
         return turn;
+    }
+
+    /**
+     * 校验轮次是否处于可重试评分状态。
+     */
+    private void requireRetryableTurn(InterviewTurnDO turn) {
+        if (!isRetryableTurn(turn)) {
+            throw new ClientException("Interview turn is not waiting for evaluation retry");
+        }
+    }
+
+    /**
+     * 判断轮次是否保留了答案且处于待补偿评分状态。
+     */
+    private boolean isRetryableTurn(InterviewTurnDO turn) {
+        return turn != null
+                && "WAITING_RETRY".equals(turn.getStatus())
+                && "EVALUATION_FAILED".equals(turn.getEvaluationStatus())
+                && "COMPENSATING".equals(turn.getCompensationStatus())
+                && StrUtil.isNotBlank(turn.getAnswer());
+    }
+
+    /**
+     * 原子抢占待补偿评分轮次，避免手动重试和多个 worker 重复推进。
+     */
+    private void claimRetryTurn(InterviewTurnDO turn) {
+        int nextAttemptCount = (turn.getAttemptCount() == null ? 0 : turn.getAttemptCount()) + 1;
+        int updated = turnMapper.update(null, Wrappers.lambdaUpdate(InterviewTurnDO.class)
+                .eq(InterviewTurnDO::getId, turn.getId())
+                .eq(InterviewTurnDO::getStatus, "WAITING_RETRY")
+                .eq(InterviewTurnDO::getEvaluationStatus, "EVALUATION_FAILED")
+                .eq(InterviewTurnDO::getCompensationStatus, "COMPENSATING")
+                .set(InterviewTurnDO::getEvaluationStatus, "EVALUATING")
+                .set(InterviewTurnDO::getCompensationStatus, "COMPENSATING")
+                .set(InterviewTurnDO::getAttemptCount, nextAttemptCount)
+                .set(InterviewTurnDO::getLastError, null));
+        if (updated == 0) {
+            throw new ClientException("Interview turn is being retried");
+        }
+        interviewTurnRuntimeService.markEvaluationRetryClaimed(turn);
+        turn.setAttemptCount(nextAttemptCount);
+        turn.setLastError(null);
+    }
+
+    /**
+     * 查询后台补偿 worker 本批次需要处理的面试轮次。
+     */
+    private List<InterviewTurnDO> listCompensatingTurns(int limit) {
+        int safeLimit = limit <= 0 ? 20 : Math.min(limit, 100);
+        List<InterviewTurnDO> turns = turnMapper.selectList(Wrappers.lambdaQuery(InterviewTurnDO.class)
+                .eq(InterviewTurnDO::getStatus, "WAITING_RETRY")
+                .eq(InterviewTurnDO::getEvaluationStatus, "EVALUATION_FAILED")
+                .eq(InterviewTurnDO::getCompensationStatus, "COMPENSATING")
+                .eq(InterviewTurnDO::getDeleted, 0)
+                .orderByAsc(InterviewTurnDO::getUpdateTime)
+                .orderByAsc(InterviewTurnDO::getId)
+                .last("LIMIT " + safeLimit));
+        return turns == null ? List.of() : turns;
     }
 
     private int nextPlannedQuestionIndex(String sessionId) {

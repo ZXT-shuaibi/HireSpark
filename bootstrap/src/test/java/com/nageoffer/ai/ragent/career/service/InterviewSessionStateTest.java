@@ -56,6 +56,10 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.TransactionDefinition;
+import org.springframework.transaction.TransactionStatus;
+import org.springframework.transaction.support.SimpleTransactionStatus;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -65,10 +69,12 @@ import java.util.concurrent.atomic.AtomicLong;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
@@ -102,6 +108,9 @@ class InterviewSessionStateTest {
 
     @Mock
     private CareerRetrievalEnhancementService careerRetrievalEnhancementService;
+
+    @Mock
+    private PlatformTransactionManager transactionManager;
 
     private final List<InterviewSessionDO> sessions = new ArrayList<>();
     private final List<InterviewTurnDO> turns = new ArrayList<>();
@@ -312,6 +321,130 @@ class InterviewSessionStateTest {
     }
 
     @Test
+    void retryEvaluationReusesSavedAnswerAndAdvancesToNextTurn() {
+        login();
+        stubVisibleLinkedObjects(true, true);
+        stubPersistence();
+        seedSessionWithAskedTurn();
+        stubRetrievalEnhancement();
+        when(singleFlightLlmService.chat(anyString(), anyString(), any(), any(ChatRequest.class)))
+                .thenThrow(new RuntimeException("llm down"))
+                .thenReturn("{\"score\":88}");
+        when(careerJsonParser.parseObject(anyString())).thenReturn(evaluation(false, null));
+
+        CareerInterviewTurnVO failed = newService().submitAnswer("session-1",
+                answer("I designed the module boundaries."));
+        CareerInterviewTurnVO retried = newService().retryEvaluation("session-1", 1);
+
+        assertEquals("WAITING_RETRY", failed.getStatus());
+        assertEquals("EVALUATED", retried.getStatus());
+        assertEquals("I designed the module boundaries.", retried.getAnswer());
+        assertEquals(88, retried.getScore());
+        assertEquals(2, retried.getAttemptCount());
+        assertEquals("EVALUATED", retried.getEvaluationStatus());
+        assertEquals("COMPENSATED", retried.getCompensationStatus());
+        assertNull(retried.getLastError());
+        assertEquals(2, turns.size());
+        assertEquals("TECHNICAL", turns.get(1).getTurnType());
+        assertEquals(2, sessions.get(0).getCurrentTurnNo());
+        assertEquals("RUNNING", sessions.get(0).getStatus());
+    }
+
+    @Test
+    void retryEvaluationRejectsNonFailedTurn() {
+        login();
+        stubVisibleLinkedObjects(true, true);
+        stubPersistence();
+        seedSessionWithAskedTurn();
+
+        assertThrows(ClientException.class, () -> newService().retryEvaluation("session-1", 1));
+
+        verify(singleFlightLlmService, never()).chat(anyString(), anyString(), any(), any(ChatRequest.class));
+    }
+
+    @Test
+    void retryEvaluationRejectsClaimedTurnWithoutCallingModel() {
+        login();
+        stubVisibleLinkedObjects(true, true);
+        stubPersistence();
+        seedSessionWithFailedTurn();
+        doAnswer(invocation -> 0).when(turnMapper).update(isNull(), anyTurnWrapper());
+
+        assertThrows(ClientException.class, () -> newService().retryEvaluation("session-1", 1));
+
+        assertEquals(1, turns.size());
+        assertEquals("WAITING_RETRY", turns.get(0).getStatus());
+        assertEquals("EVALUATION_FAILED", turns.get(0).getEvaluationStatus());
+        verify(singleFlightLlmService, never()).chat(anyString(), anyString(), any(), any(ChatRequest.class));
+    }
+
+    @Test
+    void retryEvaluationKeepsWaitingRetryWhenSecondAttemptFails() {
+        login();
+        stubVisibleLinkedObjects(true, true);
+        stubPersistence();
+        seedSessionWithAskedTurn();
+        stubRetrievalEnhancement();
+        when(singleFlightLlmService.chat(anyString(), anyString(), any(), any(ChatRequest.class)))
+                .thenThrow(new RuntimeException("llm down"))
+                .thenThrow(new RuntimeException("still down"));
+
+        newService().submitAnswer("session-1", answer("I designed the module boundaries."));
+        CareerInterviewTurnVO retried = newService().retryEvaluation("session-1", 1);
+
+        assertEquals("WAITING_RETRY", retried.getStatus());
+        assertEquals("I designed the module boundaries.", retried.getAnswer());
+        assertEquals("EVALUATION_FAILED", retried.getEvaluationStatus());
+        assertEquals("COMPENSATING", retried.getCompensationStatus());
+        assertEquals(2, retried.getAttemptCount());
+        assertNotNull(retried.getLastError());
+        assertEquals(1, turns.size());
+        assertEquals(1, sessions.get(0).getCurrentTurnNo());
+    }
+
+    @Test
+    void compensationWorkerRetriesPendingTurnsWithoutUserContext() {
+        login();
+        stubVisibleLinkedObjects(true, true);
+        stubPersistence();
+        seedSessionWithAskedTurn();
+        stubRetrievalEnhancement();
+        when(singleFlightLlmService.chat(anyString(), anyString(), any(), any(ChatRequest.class)))
+                .thenThrow(new RuntimeException("llm down"))
+                .thenReturn("{\"score\":88}");
+        when(careerJsonParser.parseObject(anyString())).thenReturn(evaluation(false, null));
+
+        newService().submitAnswer("session-1", answer("I designed the module boundaries."));
+        UserContext.clear();
+        int compensated = newService().compensatePendingEvaluations(10);
+
+        assertEquals(1, compensated);
+        assertEquals("EVALUATED", turns.get(0).getStatus());
+        assertEquals(2, turns.get(0).getAttemptCount());
+        assertEquals("COMPENSATED", turns.get(0).getCompensationStatus());
+        assertEquals(2, turns.size());
+        assertEquals(2, sessions.get(0).getCurrentTurnNo());
+    }
+
+    @Test
+    void compensationWorkerSkipsTurnWhenRetryClaimAlreadyTaken() {
+        login();
+        stubVisibleLinkedObjects(true, true);
+        stubPersistence();
+        seedSessionWithFailedTurn();
+        doAnswer(invocation -> 0).when(turnMapper).update(isNull(), anyTurnWrapper());
+        UserContext.clear();
+
+        int compensated = newService().compensatePendingEvaluations(10);
+
+        assertEquals(0, compensated);
+        assertEquals(1, turns.size());
+        assertEquals("WAITING_RETRY", turns.get(0).getStatus());
+        assertEquals("EVALUATION_FAILED", turns.get(0).getEvaluationStatus());
+        verify(singleFlightLlmService, never()).chat(anyString(), anyString(), any(), any(ChatRequest.class));
+    }
+
+    @Test
     void linkedResumeAndJobMustBeVisibleToCurrentUser() {
         login();
         stubVisibleLinkedObjects(false, true);
@@ -349,7 +482,8 @@ class InterviewSessionStateTest {
                 singleFlightLlmService,
                 new InterviewTurnRuntimeServiceImpl(),
                 interviewSessionRecoveryService,
-                careerRetrievalEnhancementService
+                careerRetrievalEnhancementService,
+                transactionManager
         );
     }
 
@@ -415,11 +549,37 @@ class InterviewSessionStateTest {
         }).when(turnMapper).insert(any(InterviewTurnDO.class));
         lenient().doAnswer(invocation -> 1).when(sessionMapper).updateById(any(InterviewSessionDO.class));
         lenient().doAnswer(invocation -> 1).when(turnMapper).updateById(any(InterviewTurnDO.class));
+        lenient().doAnswer(invocation -> claimRetryableTurn()).when(turnMapper).update(isNull(), anyTurnWrapper());
         lenient().when(sessionMapper.selectOne(anySessionWrapper()))
                 .thenAnswer(invocation -> selectSession(invocation.getArgument(0)));
         lenient().when(turnMapper.selectOne(anyTurnWrapper()))
                 .thenAnswer(invocation -> selectTurn(invocation.getArgument(0)));
         lenient().when(turnMapper.selectList(anyTurnWrapper())).thenAnswer(invocation -> List.copyOf(turns));
+        lenient().when(transactionManager.getTransaction(any(TransactionDefinition.class)))
+                .thenReturn(new SimpleTransactionStatus());
+        lenient().doAnswer(invocation -> null).when(transactionManager).commit(any(TransactionStatus.class));
+        lenient().doAnswer(invocation -> null).when(transactionManager).rollback(any(TransactionStatus.class));
+    }
+
+    private int claimRetryableTurn() {
+        return turns.stream()
+                .filter(this::retryableTurn)
+                .findFirst()
+                .map(turn -> {
+                    turn.setEvaluationStatus("EVALUATING");
+                    turn.setCompensationStatus("COMPENSATING");
+                    turn.setAttemptCount((turn.getAttemptCount() == null ? 0 : turn.getAttemptCount()) + 1);
+                    turn.setLastError(null);
+                    return 1;
+                })
+                .orElse(0);
+    }
+
+    private boolean retryableTurn(InterviewTurnDO turn) {
+        return "WAITING_RETRY".equals(turn.getStatus())
+                && "EVALUATION_FAILED".equals(turn.getEvaluationStatus())
+                && "COMPENSATING".equals(turn.getCompensationStatus())
+                && turn.getAnswer() != null;
     }
 
     private void seedSessionWithAskedTurn() {
@@ -449,6 +609,21 @@ class InterviewSessionStateTest {
                 .compensationStatus("NONE")
                 .attemptCount(0)
                 .build());
+    }
+
+    private void seedSessionWithFailedTurn() {
+        seedSessionWithAskedTurn();
+        InterviewTurnDO turn = turns.get(0);
+        turn.setStatus("WAITING_RETRY");
+        turn.setAnswerStatus("ANSWER_SAVED");
+        turn.setEvaluationStatus("EVALUATION_FAILED");
+        turn.setFollowUpDecisionStatus("NOT_STARTED");
+        turn.setCompensationStatus("COMPENSATING");
+        turn.setAnswer("I designed the module boundaries.");
+        turn.setStepIdempotencyKey("session-1:1:rev-1");
+        turn.setAttemptCount(1);
+        turn.setLastError("RuntimeException: llm down");
+        sessions.get(0).setStatus("RUNNING");
     }
 
     private InterviewSessionDO selectSession(Wrapper<InterviewSessionDO> wrapper) {

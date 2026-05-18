@@ -79,6 +79,27 @@ public class InterviewTurnRuntimeServiceImpl implements InterviewTurnRuntimeServ
         turn.setLastError(null);
     }
 
+    /**
+     * 标记补偿评分已经成功完成。
+     */
+    @Override
+    public void markEvaluationCompensated(InterviewTurnDO turn) {
+        turn.setStatus("EVALUATED");
+        turn.setEvaluationStatus(InterviewRuntimeStatus.EVALUATED.name());
+        turn.setCompensationStatus(InterviewRuntimeStatus.COMPENSATED.name());
+        turn.setLastError(null);
+    }
+
+    /**
+     * 标记补偿任务已经被当前实例抢占。
+     */
+    @Override
+    public void markEvaluationRetryClaimed(InterviewTurnDO turn) {
+        turn.setStatus("WAITING_RETRY");
+        turn.setEvaluationStatus(InterviewRuntimeStatus.EVALUATING.name());
+        turn.setCompensationStatus(InterviewRuntimeStatus.COMPENSATING.name());
+    }
+
     @Override
     public void markEvaluationFailed(InterviewTurnDO turn, RuntimeException ex) {
         turn.setStatus("WAITING_RETRY");

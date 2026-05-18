@@ -33,6 +33,16 @@ public interface InterviewTurnRuntimeService {
 
     void markEvaluated(InterviewTurnDO turn);
 
+    /**
+     * 标记补偿评分成功，保留评分完成态并记录补偿完成状态。
+     */
+    void markEvaluationCompensated(InterviewTurnDO turn);
+
+    /**
+     * 标记补偿评分任务已被抢占，防止多个补偿实例重复推进同一轮。
+     */
+    void markEvaluationRetryClaimed(InterviewTurnDO turn);
+
     void markEvaluationFailed(InterviewTurnDO turn, RuntimeException ex);
 
     void markFollowUpDeciding(InterviewTurnDO turn);

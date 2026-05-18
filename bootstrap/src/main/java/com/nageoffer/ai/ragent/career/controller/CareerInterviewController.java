@@ -65,6 +65,15 @@ public class CareerInterviewController {
         return Results.success(interviewSessionService.submitAnswer(sessionId, request));
     }
 
+    /**
+     * 手动重试指定轮次的面试评分。
+     */
+    @PostMapping("/career/interviews/{sessionId}/turns/{turnNo}/retry-evaluation")
+    public Result<CareerInterviewTurnVO> retryEvaluation(@PathVariable String sessionId,
+                                                         @PathVariable Integer turnNo) {
+        return Results.success(interviewSessionService.retryEvaluation(sessionId, turnNo));
+    }
+
     @PostMapping("/career/interviews/{sessionId}/pause")
     public Result<Void> pause(@PathVariable String sessionId) {
         interviewSessionService.pause(sessionId);

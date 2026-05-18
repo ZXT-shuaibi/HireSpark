@@ -49,6 +49,11 @@ class CareerInterviewControllerMappingTest {
                         .getMethod("submitAnswer", String.class, CareerInterviewAnswerRequest.class)
                         .getAnnotation(PostMapping.class)
                         .value());
+        assertArrayEquals(new String[]{"/career/interviews/{sessionId}/turns/{turnNo}/retry-evaluation"},
+                CareerInterviewController.class
+                        .getMethod("retryEvaluation", String.class, Integer.class)
+                        .getAnnotation(PostMapping.class)
+                        .value());
         assertArrayEquals(new String[]{"/career/interviews/{sessionId}/pause"},
                 CareerInterviewController.class
                         .getMethod("pause", String.class)
