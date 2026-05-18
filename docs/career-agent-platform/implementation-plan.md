@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Build a Career Agent Platform inside Ragent that turns the existing RAG base into a resume, JD alignment, resume optimization, mock interview, review, and AI-call governance loop.
+**Goal:** Build a Career Agent Platform inside Ragent that turns the existing RAG base into a resume, JD alignment, resume optimization, mock interview, review, and AI-call governance loop, while absorbing the runtime governance and optimization strengths of AI-Meeting and JobNavigator into one Career domain.
 
-**Architecture:** Keep Ragent as the only runtime base. Add a bounded `career` domain inside `bootstrap`, reuse Ragent auth, model routing, storage, trace, PostgreSQL, Redis helpers, and frontend shell, and migrate JobNavigator/AI-Meeting capabilities as domain behavior rather than as independent applications. Treat JobNavigator's judge-executor optimization and AI-Meeting's interview runtime governance as Career-domain modules, not as copied subsystems.
+**Architecture:** Keep Ragent as the only runtime base. Add a bounded `career` domain inside `bootstrap`, reuse Ragent auth, model routing, storage, trace, PostgreSQL, Redis helpers, and frontend shell, and migrate JobNavigator/AI-Meeting capabilities as domain behavior rather than as independent applications. The Career domain is layered into platform base, career artifacts, interview/runtime governance, optimization/retrieval/rendering, and Career Skill Pack/observability. Treat JobNavigator's judge-executor optimization and AI-Meeting's interview runtime governance as Career-domain modules, not as copied subsystems.
 
 **Tech Stack:** Java 17, Spring Boot 3.5.7, MyBatis-Plus, PostgreSQL JSONB, Ragent `infra-ai` LLMService, Ragent Trace, React 18, Vite, TypeScript, Zustand-compatible service modules, Tailwind/shadcn UI.
 
@@ -36,10 +36,46 @@ Confirmed PRD alignment:
 - Support generic mode for non-Java roles without promising role-specific templates or role-specific rubrics in MVP.
 - Implement deletion/privacy behavior so deleted resume/JD/interview/report content is not visible to users and exported files become invalid.
 - Implement MVP retry/idempotency behavior for malformed AI outputs and failed interview scoring.
-- Promote AI-Meeting interview state machine, turn idempotency, compensation, long-session recovery, and Single-flight to explicit Phase 2/3 tasks.
-- Promote JobNavigator judge-executor optimization, quality gate, HyDE/Rerank, multi-format rendering, and progress visibility to explicit Phase 1/3 tasks.
+- Promote AI-Meeting interview state machine, turn idempotency, compensation worker, manual score retry, long-session recovery, and Single-flight to explicit Phase 2/3 tasks.
+- Promote JobNavigator judge-executor optimization, multi-round reflection, quality gate, HyDE/Rerank, multi-format rendering, and progress visibility to explicit Phase 1/3 tasks.
 - Keep MVP rubric management read-only with `career-java-backend-v1` and `career-general-v1` templates.
 - Keep admin MVP focused on task visibility, failure reasons, basic counts, and trace links; advanced charts stay in Phase 3.
+
+### Highlight Absorption Map
+
+| Source | Highlight | Implementation Focus | Primary Tasks |
+| --- | --- | --- | --- |
+| AI-Meeting | Complete answer chain, explicit state machine, cache and snapshot recovery | Turn the interview path into a visible state machine with saved answers, score retries, follow-up decisions, compensation worker, and snapshot recovery | Task 12, Task 21, Task 22 |
+| AI-Meeting | Manual score retry and round-level idempotency | Keep the same turn context on retry, protect `stepIdempotencyKey`, and avoid duplicate follow-up generation | Task 12, Task 21 |
+| AI-Meeting | Distributed Single-flight, owner heartbeat, result replay | Wrap artifact-generating AI calls with one owner, heartbeats, fencing token, and replay on duplicate requests | Task 23 |
+| AI-Meeting | Follow-up rule chain and AI call guard | Add deterministic follow-up rules plus circuit breaker, bulkhead, retry, and timeout governance around scoring, follow-up, report, and optimization AI calls | Task 21, Task 23, future guard task |
+| AI-Meeting | Skill knowledge package | Turn Rubric, Prompt, state machine, recovery rules, and troubleshooting notes into `Career Skill Pack` assets | Task 19, Task 26 |
+| JobNavigator | Judge-executor resume optimization | Split optimization into executor suggestion generation and judge review with evidence, risk flags, and review records | Task 10, Task 20 |
+| JobNavigator | Multi-round reflection and `0.8` gate | Show the optimization loop as generate -> review -> revise -> pass or needs review, and keep progress events visible | Task 20, Task 26 |
+| JobNavigator | HyDE/Rerank retrieval enrichment | Use Ragent retrieval abstractions for query expansion and rerank, never add Qdrant runtime | Task 24 |
+| JobNavigator | Multi-format render pipeline | Gate PDF/Word rendering with field validation, template versioning, and export invalidation rules | Task 25 |
+| JobNavigator | Plan-and-Execute interview agents | Split interview into plan, execute, score, and reflect roles with explicit routing and stage handoff once the text interview loop is stable | Future orchestration task |
+| JobNavigator | Radar report computation | Compute radar dimensions from resume, interview, evidence, and risk data instead of only trusting free-form model radar output | Task 13, future radar task |
+| JobNavigator | Asynchronous task observability | Track task attempts, progress events, failure reasons, and Trace links across resume, interview, and optimization flows | Task 14, Task 18, Task 19 |
+
+### Fusion Architecture And Delivery Order
+
+The combined Career architecture is delivered from the inside out:
+
+1. Ragent base layer stays unchanged: auth, model routing, trace, storage, and frontend shell remain the only runtime base.
+2. Career artifact layer stabilizes the domain graph: resume, JD, optimization task, interview session, report, and trace records are versioned and linked.
+3. AI-Meeting runtime governance is absorbed next: interview state machine, turn idempotency, manual retry, compensation worker, recovery snapshot, follow-up rule chain, AI call guard, and Single-flight.
+4. JobNavigator optimization discipline is absorbed alongside it: judge-executor loop, quality gate, HyDE/Rerank, progress events, radar report computation, and render validation.
+5. Career Skill Pack and admin observability make the system agent-consumable and reviewable.
+
+Recommended build order for the next implementation passes:
+
+- First: finish interview runtime hardening and replay-safe governance.
+- Second: add explicit follow-up decision chain plus AI call guard.
+- Third: deepen judge-executor, radar computation, and report explainability.
+- Fourth: complete retrieval/rerank and export rendering depth.
+- Fifth: publish Career Skill Pack and polish admin observability.
+- Phase 4: voice and multimodal extensions only after the text loop is stable.
 
 ### PRD v0.2 Delta Mapping
 
@@ -94,7 +130,7 @@ Estimated total:
 | B7 | 3 人日 | 管理端与观测 | Admin API、任务列表、基础统计、只读 Rubric、Trace 链接 | 管理员可定位任务状态和失败原因 |
 | B8 | 2 人日 | 全链路验收与文档 | 全量 smoke、quick start、PRD 链接、遗留修复 | MVP 可演示，文档可交付 |
 | B9 | 4 人日 | JobNavigator 优化深度 | 裁判-执行者、多轮反思、0.8 质量门禁、优化进度事件 | 简历优化能讲清“生成、评审、修正、达标” |
-| B10 | 4 人日 | AI-Meeting 面试运行时 | 轮次幂等、补偿、持久化快照、恢复 CAS | 面试中断/重复提交不会破坏闭环 |
+| B10 | 4 人日 | AI-Meeting 面试运行时 | 轮次幂等、补偿 worker、手动重试评分、持久化快照、恢复 CAS | 面试中断/重复提交不会破坏闭环 |
 | B11 | 3 人日 | AI Single-flight 治理 | singleFlightKey、owner heartbeat、fencing token、结果回放 | 同输入并发只产生一份 AI 结果 |
 | B12 | 2 人日 | HyDE/Rerank 检索增强 | 假设简历 query、缺口 query、Rerank、证据类型标记 | 检索增强不污染简历真实性 |
 | B13 | 1.5 人日 | 多格式渲染增强 | PDF/Word 渲染门禁、模板版本、字段校验 | 渲染管线可演示、可追溯、可失效 |
@@ -113,10 +149,10 @@ Estimated total:
 | B7: Admin and observability | 3d | Tasks 14 and 17 | Backend + frontend | B2 and B5 task records exist | Career admin APIs, dashboard, task list, read-only rubric page, trace links | `mvn -pl bootstrap -DskipTests compile`; `cd frontend`; `npm run build` | Admin can inspect tasks and trace links |
 | B8: Full smoke and docs | 2d | Tasks 18-19 | Full stack | B1-B7 complete | Full product smoke, quick start doc, PRD plan link, final acceptance notes | Commands from Task 18 and manual smoke checklist | MVP implementation can be demoed |
 | B9: Judge-executor optimization depth | 4d | Task 20 | Backend + frontend | B2 and B3 stable | Optimization review records, quality gate, progress events, UI status | `mvn -pl bootstrap -Dtest=ResumeOptimizationReviewTest test`; `cd frontend`; `npm run build` | Optimization process is visible and risky suggestions are blocked |
-| B10: Interview runtime hardening | 4d | Tasks 21-22 | Backend | B5 and B6 stable | Turn idempotency, compensation state, session snapshot, recovery CAS | `mvn -pl bootstrap -Dtest=InterviewTurnIdempotencyTest,InterviewSessionRecoveryTest test` | Duplicate submits and cache-loss recovery are safe |
-| B11: Career AI Single-flight | 3d | Task 23 | Backend | B9 and B10 stable | Single-flight records, owner heartbeat, fencing token, result replay | `mvn -pl bootstrap -Dtest=CareerSingleFlightTest test` | Same input creates one AI result across concurrent requests |
+| B10: Interview runtime hardening | 4d | Tasks 21-22 | Backend | B5 and B6 stable | Turn idempotency, compensation worker, manual score retry, session snapshot, recovery CAS | `mvn -pl bootstrap -Dtest=InterviewTurnIdempotencyTest,InterviewSessionRecoveryTest test` | Duplicate submits and cache-loss recovery are safe |
+| B11: Career AI Single-flight | 3d | Task 23 | Backend | B9 and B10 stable | Single-flight records, owner heartbeat, fencing token, result replay, compensation and retry dedup | `mvn -pl bootstrap -Dtest=CareerSingleFlightTest test` | Same input creates one AI result across concurrent requests |
 | B12: HyDE/Rerank enrichment | 2d | Task 24 | Backend | Retrieval abstractions stable | Career retrieval service, HyDE query markers, rerank integration | `mvn -pl bootstrap -Dtest=CareerRetrievalEnhancementTest test` | HyDE is evidence/query only, not resume content |
-| B13: Render pipeline enhancement | 1.5d | Task 25 | Backend | Task 11 stable | PDF/Word gate, template version, export validation result | `mvn -pl bootstrap -Dtest=ResumeRenderPipelineTest test` | Exports are validated and traceable |
+| B13: Render pipeline enhancement | 1.5d | Task 25 | Backend | Task 11 stable | PDF/Word gate, template version, export validation result, invalidation on delete | `mvn -pl bootstrap -Dtest=ResumeRenderPipelineTest test` | Exports are validated and traceable |
 
 ### Task-Level Duration Diff
 
@@ -2139,6 +2175,7 @@ If no changes were required, do not create an empty commit.
 **Files:**
 - Modify: `docs/career-agent-platform/prd-career-agent-platform.md`
 - Create: `docs/career-agent-platform/quick-start.md`
+- Create or update: `docs/career-agent-platform/career-skill-pack.md`
 
 - [ ] **Step 1: Create quick start doc**
 
@@ -2167,6 +2204,8 @@ Career Agent Platform adds resume parsing, JD alignment, resume optimization, te
 - AI calls use `infra-ai` model routing.
 - Career tasks write Ragent Trace records.
 - Resume, JD, interview, and report data are versioned and linked.
+- JobNavigator highlights are absorbed as judge-executor optimization, quality gate, HyDE/Rerank, render pipeline, and progress visibility.
+- AI-Meeting highlights are absorbed as interview state machine, turn idempotency, compensation worker, manual score retry, recovery, and Single-flight.
 - Voice and demeanor analysis are extension points after the text loop is stable.
 ```
 
@@ -2180,10 +2219,26 @@ In `docs/career-agent-platform/prd-career-agent-platform.md`, add a short sectio
 实施计划见 `docs/career-agent-platform/implementation-plan.md`。
 ```
 
-- [ ] **Step 3: Commit docs**
+- [ ] **Step 3: Create Career Skill Pack doc**
+
+Create `docs/career-agent-platform/career-skill-pack.md` with:
+
+```markdown
+# Career Skill Pack
+
+## Agent-Consumable Knowledge
+
+- Rubric versions: `career-java-backend-v1`, `career-general-v1`.
+- Prompt contracts: resume parse, JD parse, alignment, optimization executor, optimization judge, interview plan, score, follow-up, report.
+- State machines: optimization review states, interview turn runtime states, session recovery states, Single-flight states.
+- Troubleshooting: malformed AI output, duplicate submit, failed score retry, compensation worker, stale owner, render validation failure.
+- Acceptance references: PRD A18-A27 and implementation Task 20-26.
+```
+
+- [ ] **Step 4: Commit docs**
 
 ```bash
-git add docs/career-agent-platform/prd-career-agent-platform.md docs/career-agent-platform/quick-start.md docs/career-agent-platform/implementation-plan.md
+git add docs/career-agent-platform/prd-career-agent-platform.md docs/career-agent-platform/implementation-plan.md docs/career-agent-platform/quick-start.md docs/career-agent-platform/career-skill-pack.md
 git commit -m "docs: add career platform implementation plan"
 ```
 
@@ -2224,11 +2279,15 @@ After executor suggestions are persisted, call reviewer, persist review, and set
 
 Persist progress events for `GENERATING`, `REVIEWING`, `REVISING`, `PASSED`, `NEEDS_REVIEW`, and `FAILED`.
 
-- [ ] **Step 6: Expose review to frontend**
+- [ ] **Step 6: Add bounded multi-round reflection**
+
+If `qualityScore < 0.8` and no high-risk unsupported claim blocks the task, generate one revision instruction set and run another executor pass. Stop after 3 total iterations or when the judge returns `PASSED`. Persist each iteration with executor output, reviewer output, rejected reason, accepted reason, trace id, and elapsed time.
+
+- [ ] **Step 7: Expose review to frontend**
 
 Extend optimization task VO with `qualityScore`, `reviewStatus`, `riskSummary`, and `progressEvents`.
 
-- [ ] **Step 7: Run verification**
+- [ ] **Step 8: Run verification**
 
 Run:
 
@@ -2252,6 +2311,7 @@ Expected: PASS.
 - [ ] **Step 1: Write idempotency tests**
 
 Create tests proving the same `sessionId + turnNo + answerRevision` returns the existing evaluation and does not create another follow-up.
+Create tests proving manual score retry reuses the same turn context and does not create a new turn.
 
 - [ ] **Step 2: Add runtime fields**
 
@@ -2272,7 +2332,15 @@ ANSWER_SAVED -> COMPENSATING -> EVALUATED
 
 `submitAnswer` must save the answer before AI evaluation, return existing result for duplicate keys, and keep the turn in `WAITING_RETRY` when evaluation fails.
 
-- [ ] **Step 5: Run verification**
+- [ ] **Step 5: Add manual retry entry**
+
+Expose a service method for retrying score evaluation on a turn in `WAITING_RETRY`. It must reuse the existing `stepIdempotencyKey`, append a new attempt, and keep the previous answer unchanged.
+
+- [ ] **Step 6: Add compensation worker contract**
+
+Define the worker query boundary for turns stuck in `ANSWER_SAVED`, `EVALUATING`, `EVALUATION_FAILED`, or `FOLLOW_UP_FAILED`. The worker may retry incomplete scoring or follow-up decisions, but it must skip completed turns and turns manually marked as final.
+
+- [ ] **Step 7: Run verification**
 
 Run:
 
@@ -2308,7 +2376,11 @@ After turn evaluation, follow-up creation, pause, resume, and finish, rebuild or
 
 Implement recovery using persisted session, turns, and latest snapshot. Use version comparison so stale recovery cannot overwrite newer state.
 
-- [ ] **Step 5: Run verification**
+- [ ] **Step 5: Add compensation-aware recovery**
+
+Snapshot recovery must include pending compensation actions and `lastAppliedStepKey`. Recovery should be idempotent: applying the same snapshot twice cannot create another score, follow-up, or report.
+
+- [ ] **Step 6: Run verification**
 
 Run:
 
@@ -2344,7 +2416,11 @@ API should support `tryAcquire`, `heartbeat`, `completeSuccess`, `completeFailur
 
 Start with optimization review and interview evaluation, then extend to parsing, alignment, and report generation.
 
-- [ ] **Step 5: Run verification**
+- [ ] **Step 5: Wrap retry and compensation paths**
+
+Manual score retry and interview compensation worker paths must acquire Single-flight with the same scene-specific key before invoking AI, so cross-node retries do not create duplicate evaluations.
+
+- [ ] **Step 6: Run verification**
 
 Run:
 
@@ -2476,14 +2552,24 @@ Planned extension files:
 - `bootstrap/src/main/java/com/nageoffer/ai/ragent/career/media/CareerInterviewAsrService.java`
 - `bootstrap/src/main/java/com/nageoffer/ai/ragent/career/media/TranscriptionSessionContext.java`
 - `bootstrap/src/main/java/com/nageoffer/ai/ragent/career/media/AstTranscriptionAssembler.java`
+- `bootstrap/src/main/java/com/nageoffer/ai/ragent/career/media/TranscriptionSegmentBuffer.java`
 - `frontend/src/pages/career/VoiceInterviewPage.tsx`
+
+Phase 4 scope details:
+
+- WebSocket receives audio frames and pushes ASR lifecycle events without changing the text interview API contract.
+- `TranscriptionSessionContext` decouples audio receive, ASR upstream calls, segment assembly, and downstream UI push.
+- `AstTranscriptionAssembler` uses `seg_id`, `pgs`, `rg`, `bg`, `ed`, and ordered segment storage to rebuild stable text and reduce duplicate or jittered fragments.
+- UI separates `committedText`, `liveText`, and `displayText`, so partial ASR updates cannot delete confirmed answer text.
+- TTS only reads questions and follow-ups; failure must degrade to text display.
 
 Acceptance gate:
 
 - Text interview session can complete without audio.
 - Report generation does not depend on audio transcript.
 - ASR transcript is stored as an optional answer source, not as the only answer source.
-- Transcription assembler handles segment ordering, duplicate text, prefix correction, and display text separation.
+- Transcription assembler handles segment ordering, duplicate text, prefix correction, `pgs/rg` replacements, and display text separation.
+- WebSocket disconnect and reconnect do not drop a saved text answer or completed score.
 - TTS is optional and does not block question display.
 
 ## Self-Review
@@ -2506,6 +2592,8 @@ Acceptance gate:
 - JobNavigator HyDE/Rerank retrieval enrichment: Task 24.
 - JobNavigator multi-format render pipeline gate: Task 25.
 - Phase 3 depth smoke verification: Task 26.
+- Career Skill Pack knowledge asset: Task 19 and Task 26.
+- PRD A28-A30 coverage: Task 21, Task 22, Task 19, Task 26, and Phase 4 Extension Gate.
 - Voice/multimodal: Phase 4 Extension Gate.
 - PRD v0.2 product-grounded scope and default Java backend / AI application scenario: PRD Alignment And Schedule Diff.
 - PRD v0.2 deltas for generic mode, deletion/privacy, retry/idempotency, read-only rubric, and admin MVP: PRD v0.2 Delta Mapping.
