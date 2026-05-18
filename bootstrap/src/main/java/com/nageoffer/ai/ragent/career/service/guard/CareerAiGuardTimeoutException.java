@@ -15,14 +15,17 @@
  * limitations under the License.
  */
 
-package com.nageoffer.ai.ragent.career.service.singleflight;
+package com.nageoffer.ai.ragent.career.service.guard;
 
-import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
+import com.nageoffer.ai.ragent.framework.errorcode.BaseErrorCode;
+import com.nageoffer.ai.ragent.framework.exception.ServiceException;
 
-public interface CareerSingleFlightLlmService {
+public class CareerAiGuardTimeoutException extends ServiceException {
 
     /**
-     * 执行带 single-flight 治理的 Career LLM 调用。
+     * 创建 Career AI 守卫超时异常。
      */
-    String chat(String scene, String singleFlightKey, String traceId, ChatRequest request);
+    public CareerAiGuardTimeoutException(String scene, Throwable cause) {
+        super("Career AI guard timeout for scene " + scene, cause, BaseErrorCode.SERVICE_TIMEOUT_ERROR);
+    }
 }

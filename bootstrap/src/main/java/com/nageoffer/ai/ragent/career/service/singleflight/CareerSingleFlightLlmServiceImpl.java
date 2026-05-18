@@ -23,21 +23,25 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nageoffer.ai.ragent.career.dao.entity.CareerSingleFlightRecordDO;
 import com.nageoffer.ai.ragent.career.dao.entity.CareerTaskAttemptDO;
 import com.nageoffer.ai.ragent.career.service.attempt.CareerTaskAttemptRecorder;
+import com.nageoffer.ai.ragent.career.service.guard.CareerAiGuardService;
 import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
 import com.nageoffer.ai.ragent.framework.exception.ServiceException;
 import com.nageoffer.ai.ragent.infra.chat.LLMService;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.util.HexFormat;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmService {
 
@@ -47,8 +51,12 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
     private final CareerSingleFlightService singleFlightService;
     private final LLMService llmService;
     private final CareerTaskAttemptRecorder attemptRecorder;
+    private final CareerAiGuardService aiGuardService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    /**
+     * 执行带 single-flight 和 AI Guard 的 Career LLM 调用。
+     */
     @Override
     public String chat(String scene, String singleFlightKey, String traceId, ChatRequest request) {
         String key = stableKey(scene, singleFlightKey);
@@ -83,17 +91,40 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
         long startTime = System.currentTimeMillis();
         try {
             singleFlightService.heartbeat(key, ownerId, fencingToken);
-            String result = llmService.chat(request);
-            singleFlightService.completeSuccess(key, ownerId, fencingToken, wrapResult(result));
+            String result = aiGuardService.execute(scene, () -> llmService.chat(request));
+            completeOwnerSuccess(key, ownerId, fencingToken, result);
             attemptRecorder.success(attempt, System.currentTimeMillis() - startTime);
             return result;
         } catch (RuntimeException ex) {
-            singleFlightService.completeFailure(key, ownerId, fencingToken, errorType(ex));
+            completeOwnerFailure(key, ownerId, fencingToken, ex);
             attemptRecorder.failed(attempt, ex, System.currentTimeMillis() - startTime);
             throw ex;
         }
     }
 
+    /**
+     * 完成 owner 成功状态，若 fencing token 已失效则阻止旧 owner 返回不可回放结果。
+     */
+    private void completeOwnerSuccess(String key, String ownerId, long fencingToken, String result) {
+        boolean completed = singleFlightService.completeSuccess(key, ownerId, fencingToken, wrapResult(result));
+        if (!completed) {
+            throw new ServiceException("AI single-flight owner lost before success completion");
+        }
+    }
+
+    /**
+     * 完成 owner 失败状态，若 owner 已被接管则仅记录日志。
+     */
+    private void completeOwnerFailure(String key, String ownerId, long fencingToken, RuntimeException ex) {
+        boolean completed = singleFlightService.completeFailure(key, ownerId, fencingToken, errorType(ex));
+        if (!completed) {
+            log.warn("AI single-flight owner lost before failure completion: key={}, errorType={}", key, errorType(ex));
+        }
+    }
+
+    /**
+     * 构建稳定的 single-flight 存储键，避免原始 prompt 过长。
+     */
     private String stableKey(String scene, String rawKey) {
         String normalizedScene = StrUtil.blankToDefault(scene, "CAREER_AI").trim();
         String normalizedKey = StrUtil.blankToDefault(rawKey, "").trim();
@@ -105,6 +136,9 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
         return prefix + digest;
     }
 
+    /**
+     * 计算输入文本的 SHA-256 摘要。
+     */
     private String sha256(String value) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -114,6 +148,9 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
         }
     }
 
+    /**
+     * 限制模型结果长度，避免 single-flight 回放字段过大。
+     */
     private String limitResult(String result) {
         if (result == null || result.length() <= RESULT_MAX_LENGTH) {
             return result;
@@ -121,14 +158,22 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
         return result.substring(0, RESULT_MAX_LENGTH);
     }
 
+    /**
+     * 将模型结果包装成可回放 JSON，兼容空响应。
+     */
     private String wrapResult(String result) {
         try {
-            return objectMapper.writeValueAsString(Map.of("response", limitResult(result)));
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("response", limitResult(result));
+            return objectMapper.writeValueAsString(payload);
         } catch (Exception ex) {
             throw new ServiceException("Failed to serialize AI single-flight result");
         }
     }
 
+    /**
+     * 从 single-flight 回放 JSON 中还原模型响应。
+     */
     private String unwrapResult(String resultJson) {
         if (StrUtil.isBlank(resultJson)) {
             return resultJson;
@@ -136,12 +181,18 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
         try {
             JsonNode root = objectMapper.readTree(resultJson);
             JsonNode response = root.get("response");
-            return response == null || response.isNull() ? resultJson : response.asText();
+            if (response == null) {
+                return resultJson;
+            }
+            return response.isNull() ? null : response.asText();
         } catch (Exception ex) {
             return resultJson;
         }
     }
 
+    /**
+     * 提取异常类型名称，供 single-flight 失败记录使用。
+     */
     private String errorType(RuntimeException ex) {
         String name = ex.getClass().getSimpleName();
         return StrUtil.blankToDefault(name, "AI_CALL_FAILED");

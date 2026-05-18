@@ -23,14 +23,29 @@ import java.util.Optional;
 
 public interface CareerSingleFlightService {
 
+    /**
+     * 尝试获取 single-flight owner 权限，或返回可回放结果状态。
+     */
     AcquireResult tryAcquire(String scene, String singleFlightKey, String ownerId, String traceId);
 
+    /**
+     * 刷新 owner 心跳，证明当前 fencing token 仍然有效。
+     */
     boolean heartbeat(String singleFlightKey, String ownerId, long fencingToken);
 
+    /**
+     * 以 owner 身份写入成功结果。
+     */
     boolean completeSuccess(String singleFlightKey, String ownerId, long fencingToken, String resultJson);
 
+    /**
+     * 以 owner 身份写入失败类型。
+     */
     boolean completeFailure(String singleFlightKey, String ownerId, long fencingToken, String errorType);
 
+    /**
+     * 查询是否存在可直接回放的成功结果。
+     */
     Optional<CareerSingleFlightRecordDO> replayIfAvailable(String singleFlightKey);
 
     record AcquireResult(boolean owner,

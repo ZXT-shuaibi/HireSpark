@@ -25,6 +25,9 @@ import com.nageoffer.ai.ragent.career.dao.entity.CareerSingleFlightRecordDO;
 import com.nageoffer.ai.ragent.career.dao.mapper.CareerTaskAttemptMapper;
 import com.nageoffer.ai.ragent.career.dao.mapper.CareerSingleFlightRecordMapper;
 import com.nageoffer.ai.ragent.career.service.attempt.CareerTaskAttemptRecorder;
+import com.nageoffer.ai.ragent.career.service.guard.CareerAiGuardProperties;
+import com.nageoffer.ai.ragent.career.service.guard.CareerAiGuardService;
+import com.nageoffer.ai.ragent.career.service.guard.CareerAiGuardTimeoutException;
 import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightService;
 import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightServiceImpl;
 import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightLlmServiceImpl;
@@ -40,6 +43,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import java.time.Duration;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -47,15 +51,18 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -186,6 +193,63 @@ class CareerSingleFlightTest {
         assertTrue(attempts.get(1).getReplayed());
     }
 
+    /**
+     * 验证模型空响应在首次调用和回放调用中保持一致的 null 语义。
+     */
+    @Test
+    void llmWrapperReplaysNullModelResultAsNull() {
+        stubPersistence();
+        stubAttemptPersistence();
+        CareerSingleFlightLlmServiceImpl wrapper = newWrapper();
+        when(llmService.chat(any(ChatRequest.class))).thenReturn(null);
+        ChatRequest request = ChatRequest.builder()
+                .messages(List.of(ChatMessage.user("null prompt")))
+                .temperature(0.1D)
+                .build();
+
+        String first = wrapper.chat("OPTIMIZATION_REVIEW", "null-key", "trace-1", request);
+        String replay = wrapper.chat("OPTIMIZATION_REVIEW", "null-key", "trace-2", request);
+
+        assertNull(first);
+        assertNull(replay);
+        verify(llmService).chat(any(ChatRequest.class));
+        assertTrue(records.get(0).getResultJson().contains("\"response\":null"));
+    }
+
+    /**
+     * 验证瞬时模型异常会被守卫重试，single-flight 只完成一次成功。
+     */
+    @Test
+    void llmWrapperRetriesTransientFailureAndCompletesSingleFlightOnce() {
+        stubPersistence();
+        stubAttemptPersistence();
+        CareerAiGuardProperties properties = newTestGuardProperties();
+        properties.getStages().get("OPTIMIZATION_EXECUTOR").setRetryMaxAttempts(2);
+        CareerSingleFlightLlmServiceImpl wrapper = newWrapper(new CareerAiGuardService(properties));
+        AtomicInteger calls = new AtomicInteger();
+        when(llmService.chat(any(ChatRequest.class))).thenAnswer(invocation -> {
+            if (calls.incrementAndGet() == 1) {
+                throw new ServiceException("transient model error");
+            }
+            return "model-after-retry";
+        });
+
+        String result = wrapper.chat("OPTIMIZATION_EXECUTOR", "retry-key", "trace-retry", ChatRequest.builder()
+                .messages(List.of(ChatMessage.user("prompt")))
+                .build());
+
+        assertEquals("model-after-retry", result);
+        assertEquals(2, calls.get());
+        assertEquals(1, records.size());
+        assertEquals("SUCCESS", records.get(0).getStatus());
+        assertEquals(1, attempts.size());
+        assertEquals("SUCCESS", attempts.get(0).getStatus());
+        verify(recordMapper, times(2)).updateById(any(CareerSingleFlightRecordDO.class));
+    }
+
+    /**
+     * 验证非 owner 的防重路径不会进入模型调用，也不会触发守卫重试。
+     */
     @Test
     void llmWrapperRejectsDuplicateWhileOwnerStillRunning() {
         stubPersistence();
@@ -193,7 +257,7 @@ class CareerSingleFlightTest {
         service.tryAcquire("INTERVIEW_EVALUATE", stableWrapperKey("INTERVIEW_EVALUATE", "manual"), "owner-a", "trace-1");
         stubAttemptPersistence();
         CareerSingleFlightLlmServiceImpl wrapper = new CareerSingleFlightLlmServiceImpl(
-                service, llmService, new CareerTaskAttemptRecorder(attemptMapper));
+                service, llmService, new CareerTaskAttemptRecorder(attemptMapper), newGuardService());
 
         assertThrows(ServiceException.class, () -> wrapper.chat("INTERVIEW_EVALUATE", "manual", "trace-2",
                 ChatRequest.builder().messages(List.of(ChatMessage.user("prompt"))).build()));
@@ -201,6 +265,36 @@ class CareerSingleFlightTest {
         assertEquals(1, attempts.size());
         assertEquals("FAILED", attempts.get(0).getStatus());
         assertEquals("ServiceException", attempts.get(0).getErrorType());
+    }
+
+    /**
+     * 验证守卫超时会转换成可识别异常，并记录 failed attempt。
+     */
+    @Test
+    void llmWrapperRecordsTimeoutAsFailedAttempt() {
+        stubPersistence();
+        stubAttemptPersistence();
+        CareerAiGuardProperties properties = newTestGuardProperties();
+        properties.getStages().get("INTERVIEW_REPORT").setTimeout(Duration.ofMillis(30));
+        properties.getStages().get("INTERVIEW_REPORT").setRetryMaxAttempts(1);
+        CareerSingleFlightLlmServiceImpl wrapper = newWrapper(new CareerAiGuardService(properties));
+        doAnswer(invocation -> {
+            sleep(200L);
+            return "late-result";
+        }).when(llmService).chat(any(ChatRequest.class));
+
+        assertThrows(CareerAiGuardTimeoutException.class, () -> wrapper.chat("INTERVIEW_REPORT",
+                "INTERVIEW_REPORT:user-1:session-1:turns",
+                "trace-timeout",
+                ChatRequest.builder().messages(List.of(ChatMessage.user("report prompt"))).build()));
+
+        assertEquals(1, attempts.size());
+        CareerTaskAttemptDO attempt = attempts.get(0);
+        assertEquals("FAILED", attempt.getStatus());
+        assertEquals("CareerAiGuardTimeoutException", attempt.getErrorType());
+        assertTrue(attempt.getErrorMessage().contains("Career AI guard timeout"));
+        assertEquals("FAILED", records.get(0).getStatus());
+        verify(llmService, times(1)).chat(any(ChatRequest.class));
     }
 
     @Test
@@ -255,11 +349,51 @@ class CareerSingleFlightTest {
         return new CareerSingleFlightServiceImpl(recordMapper);
     }
 
+    /**
+     * 创建默认 AI Guard 的 single-flight LLM 包装器。
+     */
     private CareerSingleFlightLlmServiceImpl newWrapper() {
+        return newWrapper(newGuardService());
+    }
+
+    /**
+     * 创建带指定 AI Guard 的 single-flight LLM 包装器。
+     */
+    private CareerSingleFlightLlmServiceImpl newWrapper(CareerAiGuardService guardService) {
         return new CareerSingleFlightLlmServiceImpl(
                 newService(),
                 llmService,
-                new CareerTaskAttemptRecorder(attemptMapper));
+                new CareerTaskAttemptRecorder(attemptMapper),
+                guardService);
+    }
+
+    /**
+     * 创建测试用 AI Guard。
+     */
+    private CareerAiGuardService newGuardService() {
+        return new CareerAiGuardService(newTestGuardProperties());
+    }
+
+    /**
+     * 创建测试用守卫配置，移除重试等待以加快单测。
+     */
+    private CareerAiGuardProperties newTestGuardProperties() {
+        CareerAiGuardProperties properties = new CareerAiGuardProperties();
+        properties.getDefaultPolicy().setRetryWaitDuration(Duration.ZERO);
+        properties.getStages().values().forEach(policy -> policy.setRetryWaitDuration(Duration.ZERO));
+        return properties;
+    }
+
+    /**
+     * 测试中使用的短暂阻塞。
+     */
+    private void sleep(long millis) {
+        try {
+            Thread.sleep(millis);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new ServiceException("sleep interrupted");
+        }
     }
 
     private String stableWrapperKey(String scene, String rawKey) {
