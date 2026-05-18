@@ -101,6 +101,16 @@ rag:
     enabled: true
     max-error-length: 1000
 
+career:
+  ai:
+    model-id:
+    prompt-version: v1
+  features:
+    resume-export: true
+    text-interview: true
+    voice-interview: false
+    demeanor-analysis: false
+
 ai:
   providers:
     ollama:
