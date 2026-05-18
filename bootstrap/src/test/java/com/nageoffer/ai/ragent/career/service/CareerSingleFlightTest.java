@@ -1,0 +1,310 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one or more
+ * contributor license agreements.  See the NOTICE file distributed with
+ * this work for additional information regarding copyright ownership.
+ * The ASF licenses this file to You under the Apache License, Version 2.0
+ * (the "License"); you may not use this file except in compliance with
+ * the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package com.nageoffer.ai.ragent.career.service;
+
+import com.baomidou.mybatisplus.core.MybatisConfiguration;
+import com.baomidou.mybatisplus.core.conditions.Wrapper;
+import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.nageoffer.ai.ragent.career.dao.entity.CareerTaskAttemptDO;
+import com.nageoffer.ai.ragent.career.dao.entity.CareerSingleFlightRecordDO;
+import com.nageoffer.ai.ragent.career.dao.mapper.CareerTaskAttemptMapper;
+import com.nageoffer.ai.ragent.career.dao.mapper.CareerSingleFlightRecordMapper;
+import com.nageoffer.ai.ragent.career.service.attempt.CareerTaskAttemptRecorder;
+import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightService;
+import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightServiceImpl;
+import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightLlmServiceImpl;
+import com.nageoffer.ai.ragent.framework.convention.ChatMessage;
+import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
+import com.nageoffer.ai.ragent.framework.exception.ServiceException;
+import com.nageoffer.ai.ragent.infra.chat.LLMService;
+import org.apache.ibatis.builder.MapperBuilderAssistant;
+import org.springframework.dao.DuplicateKeyException;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
+
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Date;
+import java.util.HexFormat;
+import java.util.List;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+@ExtendWith(MockitoExtension.class)
+class CareerSingleFlightTest {
+
+    @Mock
+    private CareerSingleFlightRecordMapper recordMapper;
+
+    @Mock
+    private CareerTaskAttemptMapper attemptMapper;
+
+    @Mock
+    private LLMService llmService;
+
+    private final List<CareerSingleFlightRecordDO> records = new ArrayList<>();
+
+    private final List<CareerTaskAttemptDO> attempts = new ArrayList<>();
+
+    @BeforeAll
+    static void initMyBatisPlusLambdaCache() {
+        MybatisConfiguration configuration = new MybatisConfiguration();
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(configuration, ""), CareerSingleFlightRecordDO.class);
+        TableInfoHelper.initTableInfo(new MapperBuilderAssistant(configuration, ""), CareerTaskAttemptDO.class);
+    }
+
+    @Test
+    void duplicateKeyReusesOwnerAndReplaysCompletedResult() {
+        stubPersistence();
+        CareerSingleFlightService service = newService();
+
+        CareerSingleFlightService.AcquireResult first = service.tryAcquire("INTERVIEW_EVALUATE", "key-1", "owner-a", "trace-1");
+        CareerSingleFlightService.AcquireResult duplicate = service.tryAcquire("INTERVIEW_EVALUATE", "key-1", "owner-b", "trace-2");
+
+        assertTrue(first.owner());
+        assertFalse(duplicate.owner());
+        assertFalse(duplicate.replayAvailable());
+        assertEquals(2, records.get(0).getRequestCount());
+
+        assertTrue(service.completeSuccess("key-1", "owner-a", first.record().getFencingToken(), "{\"score\":88}"));
+        CareerSingleFlightService.AcquireResult replay = service.tryAcquire("INTERVIEW_EVALUATE", "key-1", "owner-c", "trace-3");
+
+        assertFalse(replay.owner());
+        assertTrue(replay.replayAvailable());
+        assertEquals("{\"score\":88}", service.replayIfAvailable("key-1").orElseThrow().getResultJson());
+    }
+
+    @Test
+    void staleFencingTokenCannotOverwriteNewOwnerResult() {
+        stubPersistence();
+        CareerSingleFlightService service = newService();
+
+        CareerSingleFlightService.AcquireResult first = service.tryAcquire("OPTIMIZATION", "key-2", "owner-a", "trace-1");
+        assertTrue(service.completeFailure("key-2", "owner-a", first.record().getFencingToken(), "TIMEOUT"));
+        CareerSingleFlightService.AcquireResult takeover = service.tryAcquire("OPTIMIZATION", "key-2", "owner-b", "trace-2");
+
+        assertTrue(takeover.owner());
+        assertEquals(2L, takeover.record().getFencingToken());
+        assertFalse(service.completeSuccess("key-2", "owner-a", 1L, "{\"stale\":true}"));
+        assertTrue(service.completeSuccess("key-2", "owner-b", 2L, "{\"fresh\":true}"));
+        assertEquals("{\"fresh\":true}", service.replayIfAvailable("key-2").orElseThrow().getResultJson());
+    }
+
+    @Test
+    void timedOutOwnerCanBeTakenOverWithNewFencingToken() {
+        stubPersistence();
+        CareerSingleFlightService service = newService();
+
+        CareerSingleFlightService.AcquireResult first = service.tryAcquire("INTERVIEW_EVALUATE", "key-timeout", "owner-a", "trace-1");
+        first.record().setHeartbeatTime(new Date(System.currentTimeMillis() - 300_000L));
+        CareerSingleFlightService.AcquireResult takeover =
+                service.tryAcquire("INTERVIEW_EVALUATE", "key-timeout", "owner-b", "trace-2");
+
+        assertTrue(takeover.owner());
+        assertEquals(2L, takeover.record().getFencingToken());
+        assertFalse(service.completeSuccess("key-timeout", "owner-a", 1L, "{\"stale\":true}"));
+        assertTrue(service.completeSuccess("key-timeout", "owner-b", 2L, "{\"fresh\":true}"));
+    }
+
+    @Test
+    void duplicateColdInsertFallsBackToExistingRunningOwner() {
+        CareerSingleFlightRecordDO existing = CareerSingleFlightRecordDO.builder()
+                .id("sf-existing")
+                .singleFlightKey("key-race")
+                .scene("OPTIMIZATION")
+                .ownerId("owner-a")
+                .fencingToken(1L)
+                .status("RUNNING")
+                .heartbeatTime(new Date())
+                .requestCount(1)
+                .build();
+        when(recordMapper.selectList(anyRecordWrapper())).thenReturn(List.of(), List.of(existing));
+        when(recordMapper.insert(any(CareerSingleFlightRecordDO.class)))
+                .thenThrow(new DuplicateKeyException("duplicate key"));
+        when(recordMapper.updateById(existing)).thenReturn(1);
+
+        CareerSingleFlightService.AcquireResult result =
+                newService().tryAcquire("OPTIMIZATION", "key-race", "owner-b", "trace-2");
+
+        assertFalse(result.owner());
+        assertFalse(result.replayAvailable());
+        assertEquals(2, existing.getRequestCount());
+        verify(recordMapper).updateById(existing);
+    }
+
+    @Test
+    void llmWrapperPersistsAndReplaysAiResultWithoutSecondModelCall() {
+        stubPersistence();
+        stubAttemptPersistence();
+        CareerSingleFlightLlmServiceImpl wrapper = newWrapper();
+        when(llmService.chat(any(ChatRequest.class))).thenReturn("model-result");
+        ChatRequest request = ChatRequest.builder()
+                .messages(List.of(ChatMessage.user("same prompt")))
+                .temperature(0.1D)
+                .build();
+
+        String first = wrapper.chat("OPTIMIZATION_REVIEW", "same-key", "trace-1", request);
+        String replay = wrapper.chat("OPTIMIZATION_REVIEW", "same-key", "trace-2", request);
+
+        assertEquals("model-result", first);
+        assertEquals("model-result", replay);
+        verify(llmService).chat(any(ChatRequest.class));
+        assertTrue(records.get(0).getResultJson().contains("model-result"));
+        assertEquals(2, attempts.size());
+        assertEquals("SUCCESS", attempts.get(0).getStatus());
+        assertFalse(attempts.get(0).getReplayed());
+        assertEquals("REPLAYED", attempts.get(1).getStatus());
+        assertTrue(attempts.get(1).getReplayed());
+    }
+
+    @Test
+    void llmWrapperRejectsDuplicateWhileOwnerStillRunning() {
+        stubPersistence();
+        CareerSingleFlightServiceImpl service = newService();
+        service.tryAcquire("INTERVIEW_EVALUATE", stableWrapperKey("INTERVIEW_EVALUATE", "manual"), "owner-a", "trace-1");
+        stubAttemptPersistence();
+        CareerSingleFlightLlmServiceImpl wrapper = new CareerSingleFlightLlmServiceImpl(
+                service, llmService, new CareerTaskAttemptRecorder(attemptMapper));
+
+        assertThrows(ServiceException.class, () -> wrapper.chat("INTERVIEW_EVALUATE", "manual", "trace-2",
+                ChatRequest.builder().messages(List.of(ChatMessage.user("prompt"))).build()));
+        verify(llmService, never()).chat(any(ChatRequest.class));
+        assertEquals(1, attempts.size());
+        assertEquals("FAILED", attempts.get(0).getStatus());
+        assertEquals("ServiceException", attempts.get(0).getErrorType());
+    }
+
+    @Test
+    void llmWrapperRecordsAttemptMetadataForArtifactCreatingAiCall() {
+        stubPersistence();
+        stubAttemptPersistence();
+        CareerSingleFlightLlmServiceImpl wrapper = newWrapper();
+        when(llmService.chat(any(ChatRequest.class))).thenReturn("{\"ok\":true}");
+        String rawKey = "OPTIMIZATION_EXECUTOR:user-1:task-1:prompt-body";
+
+        wrapper.chat("OPTIMIZATION_EXECUTOR", rawKey, "trace-task-1", ChatRequest.builder()
+                .messages(List.of(ChatMessage.user("prompt-body with resume and JD evidence")))
+                .temperature(0.1D)
+                .build());
+
+        assertEquals(1, attempts.size());
+        CareerTaskAttemptDO attempt = attempts.get(0);
+        assertEquals("OPTIMIZATION_EXECUTOR", attempt.getScene());
+        assertEquals("user-1", attempt.getUserId());
+        assertEquals("task-1", attempt.getBusinessId());
+        assertEquals(rawKey, attempt.getIdempotencyKey());
+        assertEquals(stableWrapperKey("OPTIMIZATION_EXECUTOR", rawKey), attempt.getSingleFlightKey());
+        assertEquals("trace-task-1", attempt.getTraceId());
+        assertEquals("RagentModelRouter", attempt.getModelName());
+        assertEquals("SUCCESS", attempt.getStatus());
+        assertTrue(attempt.getPromptSummary().contains("messages=1"));
+        assertTrue(attempt.getPromptSummary().contains("sha256="));
+        assertFalse(attempt.getPromptSummary().contains("resume and JD evidence"));
+        assertTrue(attempt.getLatencyMs() >= 0);
+    }
+
+    @Test
+    void llmWrapperRecordsFailedAttemptWithErrorType() {
+        stubPersistence();
+        stubAttemptPersistence();
+        CareerSingleFlightLlmServiceImpl wrapper = newWrapper();
+        when(llmService.chat(any(ChatRequest.class))).thenThrow(new ServiceException("model timeout"));
+
+        assertThrows(ServiceException.class, () -> wrapper.chat("INTERVIEW_REPORT",
+                "INTERVIEW_REPORT:user-1:session-1:turns",
+                "trace-report-1",
+                ChatRequest.builder().messages(List.of(ChatMessage.user("report prompt"))).build()));
+
+        assertEquals(1, attempts.size());
+        CareerTaskAttemptDO attempt = attempts.get(0);
+        assertEquals("FAILED", attempt.getStatus());
+        assertEquals("ServiceException", attempt.getErrorType());
+        assertTrue(attempt.getErrorMessage().contains("model timeout"));
+    }
+
+    private CareerSingleFlightServiceImpl newService() {
+        return new CareerSingleFlightServiceImpl(recordMapper);
+    }
+
+    private CareerSingleFlightLlmServiceImpl newWrapper() {
+        return new CareerSingleFlightLlmServiceImpl(
+                newService(),
+                llmService,
+                new CareerTaskAttemptRecorder(attemptMapper));
+    }
+
+    private String stableWrapperKey(String scene, String rawKey) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            String hash = HexFormat.of().formatHex(digest.digest((scene + ":" + rawKey).getBytes(StandardCharsets.UTF_8)));
+            return scene + ":" + hash;
+        } catch (NoSuchAlgorithmException ex) {
+            throw new IllegalStateException(ex);
+        }
+    }
+
+    private void stubPersistence() {
+        records.clear();
+        lenient().when(recordMapper.selectList(anyRecordWrapper())).thenAnswer(invocation -> List.copyOf(records));
+        doAnswer(invocation -> {
+            CareerSingleFlightRecordDO record = invocation.getArgument(0);
+            if (record.getId() == null) {
+                record.setId("sf-" + (records.size() + 1));
+            }
+            records.add(record);
+            return 1;
+        }).when(recordMapper).insert(any(CareerSingleFlightRecordDO.class));
+        lenient().doAnswer(invocation -> 1).when(recordMapper).updateById(any(CareerSingleFlightRecordDO.class));
+    }
+
+    private void stubAttemptPersistence() {
+        attempts.clear();
+        lenient().doAnswer(invocation -> {
+            CareerTaskAttemptDO attempt = invocation.getArgument(0);
+            if (attempt.getId() == null) {
+                attempt.setId("attempt-" + (attempts.size() + 1));
+            }
+            attempts.add(attempt);
+            return 1;
+        }).when(attemptMapper).insert(any(CareerTaskAttemptDO.class));
+        lenient().doAnswer(invocation -> {
+            CareerTaskAttemptDO attempt = invocation.getArgument(0);
+            attempts.replaceAll(existing -> existing.getId().equals(attempt.getId()) ? attempt : existing);
+            return 1;
+        }).when(attemptMapper).updateById(any(CareerTaskAttemptDO.class));
+    }
+
+    @SuppressWarnings("unchecked")
+    private Wrapper<CareerSingleFlightRecordDO> anyRecordWrapper() {
+        return (Wrapper<CareerSingleFlightRecordDO>) any(Wrapper.class);
+    }
+}
