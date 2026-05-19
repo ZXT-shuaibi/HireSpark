@@ -29,7 +29,7 @@ import java.util.Optional;
 /**
  * 会话终态守卫节点，已完成或已取消的会话不再生成追问。
  */
-@Order(20)
+@Order(10)
 @Component
 public class CompletedStateGuardRule implements FollowUpDecisionRule {
 

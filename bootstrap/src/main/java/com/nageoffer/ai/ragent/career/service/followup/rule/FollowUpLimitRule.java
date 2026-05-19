@@ -29,7 +29,7 @@ import java.util.Optional;
 /**
  * 追问次数上限节点，达到配置上限后优先终止后续追问判断。
  */
-@Order(10)
+@Order(20)
 @Component
 public class FollowUpLimitRule implements FollowUpDecisionRule {
 

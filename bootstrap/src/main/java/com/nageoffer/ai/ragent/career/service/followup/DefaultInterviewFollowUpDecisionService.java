@@ -74,8 +74,8 @@ public class DefaultInterviewFollowUpDecisionService implements InterviewFollowU
     private static List<FollowUpDecisionRule> defaultRules() {
         CareerInterviewFollowUpProperties properties = new CareerInterviewFollowUpProperties();
         return List.of(
-                new FollowUpLimitRule(properties),
                 new CompletedStateGuardRule(),
+                new FollowUpLimitRule(properties),
                 new AiSuggestionRule(),
                 new MissingPointsRule(),
                 new LowScoreRule(properties));

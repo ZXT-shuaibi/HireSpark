@@ -353,7 +353,7 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
         }
 
         persistEvaluationSuccess(session, currentTurn, evaluation, userId, stepIdempotencyKey, compensation);
-        return toTurnVO(currentTurn, evaluation.feedback());
+        return toTurnVO(currentTurn);
     }
 
     /**
@@ -430,6 +430,7 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
                         evaluation.followUpRequired(),
                         evaluation.followUpQuestion(),
                         session.getStatus()));
+        appendFollowUpDecisionAudit(currentTurn, evaluation.feedback(), followUpDecision);
         if (followUpDecision.required()) {
             InterviewTurnDO followUp = createFollowUpTurn(session, currentTurn, followUpDecision.question(), userId);
             session.setCurrentTurnNo(followUp.getTurnNo());
@@ -447,6 +448,23 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
             InterviewFlowStateMachine.applySessionStatus(session, InterviewSessionStatus.COMPLETED);
             interviewTurnRuntimeService.markSessionCompleted(currentTurn);
         }
+    }
+
+    /**
+     * 将追问裁决命中的规则和原因写入评分反馈，便于后续查询和流程审计。
+     */
+    private void appendFollowUpDecisionAudit(InterviewTurnDO turn,
+                                             Map<String, Object> feedback,
+                                             InterviewFollowUpDecision decision) {
+        Map<String, Object> target = feedback == null ? new LinkedHashMap<>() : feedback;
+        Map<String, Object> audit = new LinkedHashMap<>();
+        audit.put("required", decision.required());
+        audit.put("matchedRule", decision.matchedRule());
+        audit.put("reason", decision.reason());
+        audit.put("question", decision.question());
+        audit.put("turnNo", turn.getTurnNo());
+        target.put("followUpDecision", audit);
+        turn.setFeedbackJson(writeJson(target, "Failed to serialize interview feedback JSON"));
     }
 
     private EvaluationResult evaluateAnswer(InterviewSessionDO session,

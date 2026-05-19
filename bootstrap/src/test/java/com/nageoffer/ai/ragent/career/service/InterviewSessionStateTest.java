@@ -183,6 +183,11 @@ class InterviewSessionStateTest {
         assertEquals(88, result.getScore());
         assertEquals("I designed the module boundaries.", result.getAnswer());
         assertNotNull(result.getFeedback());
+        @SuppressWarnings("unchecked")
+        Map<String, Object> followUpAudit = (Map<String, Object>) result.getFeedback().get("followUpDecision");
+        assertNotNull(followUpAudit);
+        assertEquals("LLM_SUGGESTION", followUpAudit.get("matchedRule"));
+        assertEquals(Boolean.TRUE, followUpAudit.get("required"));
         assertEquals(2, turns.size());
         assertEquals("FOLLOW_UP", turns.get(1).getTurnType());
         assertEquals("Which tradeoff mattered most?", turns.get(1).getQuestion());

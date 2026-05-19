@@ -99,6 +99,20 @@ class InterviewFollowUpDecisionServiceTest {
     }
 
     /**
+     * 验证会话终态守卫优先于追问次数上限，保证审计原因准确。
+     */
+    @Test
+    void completedSessionGuardTakesPriorityOverFollowUpLimit() {
+        InterviewFollowUpDecision decision = service.decide(request(85, false, null,
+                Map.of("weaknesses", List.of("too shallow")),
+                List.of(turn("FOLLOW_UP"), turn("FOLLOW_UP")),
+                InterviewSessionStatus.COMPLETED.name()));
+
+        assertFalse(decision.required());
+        assertEquals("COMPLETED_STATE_GUARD", decision.matchedRule());
+    }
+
+    /**
      * 验证低分且无 LLM 追问问题时生成保守兜底追问。
      */
     @Test
@@ -202,8 +216,8 @@ class InterviewFollowUpDecisionServiceTest {
     // 构造包含固定规则顺序的追问决策服务，避免测试依赖 Spring 容器。
     private DefaultInterviewFollowUpDecisionService serviceWith(CareerInterviewFollowUpProperties properties) {
         return new DefaultInterviewFollowUpDecisionService(List.of(
-                new FollowUpLimitRule(properties),
                 new CompletedStateGuardRule(),
+                new FollowUpLimitRule(properties),
                 new AiSuggestionRule(),
                 new MissingPointsRule(),
                 new LowScoreRule(properties)
