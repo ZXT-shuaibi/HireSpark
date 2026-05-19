@@ -2177,7 +2177,7 @@ If no changes were required, do not create an empty commit.
 - Create: `docs/career-agent-platform/quick-start.md`
 - Create or update: `docs/career-agent-platform/career-skill-pack.md`
 
-- [ ] **Step 1: Create quick start doc**
+- [x] **Step 1: Create quick start doc**
 
 Create `docs/career-agent-platform/quick-start.md` with:
 
@@ -2209,7 +2209,7 @@ Career Agent Platform adds resume parsing, JD alignment, resume optimization, te
 - Voice and demeanor analysis are extension points after the text loop is stable.
 ```
 
-- [ ] **Step 2: Update PRD review notes**
+- [x] **Step 2: Update PRD review notes**
 
 In `docs/career-agent-platform/prd-career-agent-platform.md`, add a short section after `## 12. Delivery Plan`:
 
@@ -2219,7 +2219,7 @@ In `docs/career-agent-platform/prd-career-agent-platform.md`, add a short sectio
 实施计划见 `docs/career-agent-platform/implementation-plan.md`。
 ```
 
-- [ ] **Step 3: Create Career Skill Pack doc**
+- [x] **Step 3: Create Career Skill Pack doc**
 
 Create `docs/career-agent-platform/career-skill-pack.md` with:
 
@@ -2235,7 +2235,7 @@ Create `docs/career-agent-platform/career-skill-pack.md` with:
 - Acceptance references: PRD A18-A27 and implementation Task 20-26.
 ```
 
-- [ ] **Step 4: Commit docs**
+- [x] **Step 4: Commit docs**
 
 ```bash
 git add docs/career-agent-platform/prd-career-agent-platform.md docs/career-agent-platform/implementation-plan.md docs/career-agent-platform/quick-start.md docs/career-agent-platform/career-skill-pack.md
