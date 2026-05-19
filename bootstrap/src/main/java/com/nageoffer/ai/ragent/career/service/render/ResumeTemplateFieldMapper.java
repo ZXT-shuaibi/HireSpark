@@ -286,7 +286,7 @@ public class ResumeTemplateFieldMapper {
     }
 
     /**
-     * 将历史 Markdown 作为参考块注入模板，避免它直接成为导出主体。
+     * 将历史 Markdown 作为代码块参考注入模板，避免它被再次解析成正文结构。
      */
     private String renderRawMarkdown(ResumeVersionDO version) {
         String rawMarkdown = version == null ? null : version.getMarkdownContent();
@@ -296,9 +296,11 @@ public class ResumeTemplateFieldMapper {
         String normalized = rawMarkdown.replace("\r\n", "\n").replace('\r', '\n').trim();
         String[] lines = normalized.split("\n", -1);
         List<String> quoted = new ArrayList<>();
+        quoted.add("```text");
         for (String line : lines) {
-            quoted.add("> " + line);
+            quoted.add(line.replace("```", "` ` `"));
         }
+        quoted.add("```");
         return String.join("\n", quoted);
     }
 

@@ -55,6 +55,21 @@ class ResumeRenderPipelineTest {
     }
 
     /**
+     * 校验原始 Markdown 不能绕过结构化姓名校验。
+     */
+    @Test
+    void rawMarkdownDoesNotSatisfyStructuredNameValidation() {
+        ResumeRenderValidationResult result = pipeline.validate(ResumeVersionDO.builder()
+                .id("version-raw")
+                .contentJson("{\"basic\":{}}")
+                .markdownContent("# Alice")
+                .build(), "MARKDOWN");
+
+        assertFalse(result.valid());
+        assertTrue(result.missingFields().contains("basic.name"));
+    }
+
+    /**
      * 校验 PDF 和 Word 导出格式已经开启渲染能力。
      */
     @Test
@@ -87,7 +102,8 @@ class ResumeRenderPipelineTest {
 
         String html = new String(output.content(), StandardCharsets.UTF_8);
         org.assertj.core.api.Assertions.assertThat(html)
-                .contains("<!DOCTYPE html>", "<h1>Alice</h1>", "<p>Java engineer</p>");
+                .contains("<!DOCTYPE html>", "<h1>Alice</h1>", "Java engineer")
+                .doesNotContain("<p>Java engineer</p>");
         assertEquals("resume-version-1.html", output.fileName());
         assertEquals("text/html", output.contentType());
     }

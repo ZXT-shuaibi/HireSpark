@@ -84,7 +84,11 @@ public class ResumeTemplateRenderer {
         Matcher matcher = PLACEHOLDER_PATTERN.matcher(template);
         StringBuffer buffer = new StringBuffer();
         while (matcher.find()) {
-            Object value = fields == null ? null : fields.get(matcher.group(1));
+            String fieldName = matcher.group(1);
+            if (fields == null || !fields.containsKey(fieldName)) {
+                throw new ServiceException("简历模板字段未配置：" + fieldName);
+            }
+            Object value = fields.get(fieldName);
             matcher.appendReplacement(buffer, Matcher.quoteReplacement(value == null ? "" : String.valueOf(value)));
         }
         matcher.appendTail(buffer);

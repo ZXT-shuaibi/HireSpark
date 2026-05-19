@@ -223,8 +223,7 @@ public class ResumeRenderPipeline {
             JsonNode root = objectMapper.readTree(version.getContentJson());
             JsonNode basic = root.path("basic");
             if ((basic.isMissingNode() || StrUtil.isBlank(basic.path("name").asText(null)))
-                    && StrUtil.isBlank(version.getTitle())
-                    && StrUtil.isBlank(version.getMarkdownContent())) {
+                    && StrUtil.isBlank(version.getTitle())) {
                 missing.add("basic.name");
             }
         } catch (Exception ex) {
