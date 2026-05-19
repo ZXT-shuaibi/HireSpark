@@ -36,6 +36,7 @@ import com.nageoffer.ai.ragent.career.dao.mapper.ResumeVersionMapper;
 import com.nageoffer.ai.ragent.career.enums.InterviewSessionStatus;
 import com.nageoffer.ai.ragent.career.enums.InterviewTurnType;
 import com.nageoffer.ai.ragent.career.service.InterviewSessionService;
+import com.nageoffer.ai.ragent.career.service.flow.InterviewFlowStateMachine;
 import com.nageoffer.ai.ragent.career.service.followup.InterviewFollowUpDecision;
 import com.nageoffer.ai.ragent.career.service.followup.InterviewFollowUpDecisionRequest;
 import com.nageoffer.ai.ragent.career.service.followup.InterviewFollowUpDecisionService;
@@ -144,7 +145,7 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
         }
         if (InterviewSessionStatus.CREATED.name().equals(session.getStatus())
                 || InterviewSessionStatus.PAUSED.name().equals(session.getStatus())) {
-            session.setStatus(InterviewSessionStatus.RUNNING.name());
+            InterviewFlowStateMachine.applySessionStatus(session, InterviewSessionStatus.RUNNING);
             session.setUpdatedBy(userId);
             sessionMapper.updateById(session);
         }
@@ -173,7 +174,7 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
             throw new ClientException("Interview session is already completed");
         }
         if (status == InterviewSessionStatus.PAUSED || status == InterviewSessionStatus.CREATED) {
-            session.setStatus(InterviewSessionStatus.RUNNING.name());
+            InterviewFlowStateMachine.applySessionStatus(session, InterviewSessionStatus.RUNNING);
         }
 
         InterviewTurnDO currentTurn = request.getTurnNo() == null
@@ -198,7 +199,7 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
         interviewTurnRuntimeService.markAnswerSaved(currentTurn, answer, stepIdempotencyKey);
         turnMapper.updateById(currentTurn);
 
-        session.setStatus(InterviewSessionStatus.RUNNING.name());
+        InterviewFlowStateMachine.applySessionStatus(session, InterviewSessionStatus.RUNNING);
         session.setUpdatedBy(userId);
         sessionMapper.updateById(session);
 
@@ -266,7 +267,7 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
         if (parseSessionStatus(session.getStatus()).terminal()) {
             throw new ClientException("Interview session is already completed");
         }
-        session.setStatus(InterviewSessionStatus.PAUSED.name());
+        InterviewFlowStateMachine.applySessionStatus(session, InterviewSessionStatus.PAUSED);
         session.setUpdatedBy(userId);
         sessionMapper.updateById(session);
         InterviewTurnDO turn = currentAskedTurn(session, userId);
@@ -282,7 +283,7 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
         if (InterviewSessionStatus.CANCELLED.name().equals(session.getStatus())) {
             throw new ClientException("Interview session is already cancelled");
         }
-        session.setStatus(InterviewSessionStatus.COMPLETED.name());
+        InterviewFlowStateMachine.applySessionStatus(session, InterviewSessionStatus.COMPLETED);
         session.setUpdatedBy(userId);
         sessionMapper.updateById(session);
         InterviewTurnDO turn = currentAskedTurn(session, userId);
@@ -442,7 +443,7 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
             session.setCurrentTurnNo(next.getTurnNo());
             interviewTurnRuntimeService.markNextMainCreated(currentTurn);
         } else {
-            session.setStatus(InterviewSessionStatus.COMPLETED.name());
+            InterviewFlowStateMachine.applySessionStatus(session, InterviewSessionStatus.COMPLETED);
             interviewTurnRuntimeService.markSessionCompleted(currentTurn);
         }
     }

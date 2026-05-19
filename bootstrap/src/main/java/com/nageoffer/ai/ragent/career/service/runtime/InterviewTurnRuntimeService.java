@@ -21,16 +21,34 @@ import com.nageoffer.ai.ragent.career.dao.entity.InterviewTurnDO;
 
 public interface InterviewTurnRuntimeService {
 
+    /**
+     * 根据会话、轮次和答案内容构造答题步骤幂等键。
+     */
     String buildStepIdempotencyKey(String sessionId, Integer turnNo, String answerRevision, String answer);
 
+    /**
+     * 判断当前轮次是否已经处理过同一个幂等步骤。
+     */
     boolean isSameStep(InterviewTurnDO turn, String stepIdempotencyKey);
 
+    /**
+     * 初始化一个待作答的面试轮次。
+     */
     void initializeAskedTurn(InterviewTurnDO turn);
 
+    /**
+     * 标记候选人答案已保存，并绑定本次答题幂等键。
+     */
     void markAnswerSaved(InterviewTurnDO turn, String answer, String stepIdempotencyKey);
 
+    /**
+     * 标记轮次进入评分中，并累加评分尝试次数。
+     */
     void markEvaluating(InterviewTurnDO turn);
 
+    /**
+     * 标记轮次评分完成。
+     */
     void markEvaluated(InterviewTurnDO turn);
 
     /**
@@ -43,13 +61,28 @@ public interface InterviewTurnRuntimeService {
      */
     void markEvaluationRetryClaimed(InterviewTurnDO turn);
 
+    /**
+     * 标记评分失败并进入等待补偿重试状态。
+     */
     void markEvaluationFailed(InterviewTurnDO turn, RuntimeException ex);
 
+    /**
+     * 标记轮次开始进行追问决策。
+     */
     void markFollowUpDeciding(InterviewTurnDO turn);
 
+    /**
+     * 标记追问轮次已经创建。
+     */
     void markFollowUpCreated(InterviewTurnDO turn);
 
+    /**
+     * 标记下一道主问题已经创建。
+     */
     void markNextMainCreated(InterviewTurnDO turn);
 
+    /**
+     * 标记会话已经完成。
+     */
     void markSessionCompleted(InterviewTurnDO turn);
 }

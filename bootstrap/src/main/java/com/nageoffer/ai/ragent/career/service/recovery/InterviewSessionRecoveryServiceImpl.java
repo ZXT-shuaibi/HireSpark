@@ -30,6 +30,7 @@ import com.nageoffer.ai.ragent.career.dao.mapper.InterviewSessionMapper;
 import com.nageoffer.ai.ragent.career.dao.mapper.InterviewSessionSnapshotMapper;
 import com.nageoffer.ai.ragent.career.dao.mapper.InterviewTurnMapper;
 import com.nageoffer.ai.ragent.career.enums.InterviewSessionStatus;
+import com.nageoffer.ai.ragent.career.service.flow.InterviewFlowStateMachine;
 import com.nageoffer.ai.ragent.framework.context.UserContext;
 import com.nageoffer.ai.ragent.framework.exception.ClientException;
 import com.nageoffer.ai.ragent.framework.exception.ServiceException;
@@ -87,7 +88,7 @@ public class InterviewSessionRecoveryServiceImpl implements InterviewSessionReco
         Integer recoveredTurnNo = recoverTurnNo(session, snapshot, turns);
         session.setCurrentTurnNo(recoveredTurnNo);
         if (!InterviewSessionStatus.COMPLETED.name().equals(session.getStatus())) {
-            session.setStatus(InterviewSessionStatus.RUNNING.name());
+            InterviewFlowStateMachine.applySessionStatus(session, InterviewSessionStatus.RUNNING);
         }
         session.setUpdatedBy(userId);
         sessionMapper.updateById(session);
