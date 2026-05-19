@@ -113,6 +113,45 @@ public final class CareerPromptTemplates {
             %s
             """;
 
+    public static final String HYDE_ALIGNMENT = """
+            你是 Career HyDE 检索画像生成器，当前场景是 JD 对齐。
+            请基于原始简历 JSON、目标 JD JSON 和检索 seed，生成一段 300 到 800 字的“目标岗位理想候选人画像”。
+            画像要覆盖岗位硬技能、项目经验、业务场景、工具链、协作方式和潜在证据线索，方便向量检索找到更相关的知识片段。
+            只输出画像正文，不输出 JSON、标题、解释或编号。该画像仅用于查询，不代表候选人真实经历，不能写入简历正文。
+            原始简历 JSON：
+            %s
+            目标 JD JSON：
+            %s
+            检索 seed：
+            %s
+            """;
+
+    public static final String HYDE_OPTIMIZATION = """
+            你是 Career HyDE 检索画像生成器，当前场景是简历优化。
+            请基于原始简历 JSON、目标 JD JSON 和检索 seed，生成一段 300 到 800 字的“可真实优化的理想简历摘要”。
+            摘要要聚焦可被原简历或 JD 支撑的技能表达、项目量化方向、职责边界、风险点和改写参考，帮助检索可信优化素材。
+            只输出摘要正文，不输出 JSON、标题、解释或编号。该摘要仅用于查询，不代表候选人真实经历，不能写入简历正文。
+            原始简历 JSON：
+            %s
+            目标 JD JSON：
+            %s
+            检索 seed：
+            %s
+            """;
+
+    public static final String HYDE_INTERVIEW = """
+            你是 Career HyDE 检索画像生成器，当前场景是面试。
+            请基于原始简历 JSON、目标 JD JSON 和检索 seed，生成一段 300 到 800 字的“面试候选画像”。
+            画像要突出面试官应深挖的技术栈、项目上下文、架构取舍、数据指标、协作经历、风险信号和追问方向，帮助召回高质量面试知识片段。
+            只输出画像正文，不输出 JSON、标题、解释或编号。该画像仅用于查询，不代表候选人真实经历，不能当成候选人事实。
+            原始简历 JSON：
+            %s
+            目标 JD JSON：
+            %s
+            检索 seed：
+            %s
+            """;
+
     private CareerPromptTemplates() {
     }
 }

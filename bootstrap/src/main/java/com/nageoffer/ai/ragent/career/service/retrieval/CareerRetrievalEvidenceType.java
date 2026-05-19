@@ -19,8 +19,23 @@ package com.nageoffer.ai.ragent.career.service.retrieval;
 
 public enum CareerRetrievalEvidenceType {
 
+    /**
+     * 原始简历正文证据，可作为候选人真实事实使用。
+     */
     RESUME_TEXT,
+
+    /**
+     * 目标 JD 正文证据，可作为岗位要求事实使用。
+     */
     JD_TEXT,
+
+    /**
+     * 向量知识库召回片段，可用于补充背景或追问深度。
+     */
     KNOWLEDGE_CHUNK,
+
+    /**
+     * HyDE 虚拟查询画像，只能用于检索和上下文参考，不能写入简历正文。
+     */
     HYDE_QUERY
 }

@@ -39,11 +39,12 @@ public class CareerRetrievalEnhancementServiceImpl implements CareerRetrievalEnh
 
     private static final int LOCAL_TEXT_MAX_LENGTH = 1600;
     private static final int QUERY_MAX_LENGTH = 1200;
-    private static final int TOP_K = 8;
     private static final int TOP_N = 4;
+    private static final int OVER_RETRIEVAL_MULTIPLIER = 3;
 
     private final ObjectProvider<RetrieverService> retrieverServiceProvider;
     private final ObjectProvider<RerankService> rerankServiceProvider;
+    private final ObjectProvider<CareerHydeQueryGenerator> hydeQueryGeneratorProvider;
 
     @Override
     public CareerRetrievalEnhancement enhanceAlignment(ResumeVersionDO resumeVersion, JobDescriptionDO job) {
@@ -73,7 +74,7 @@ public class CareerRetrievalEnhancementServiceImpl implements CareerRetrievalEnh
                                                ResumeVersionDO resumeVersion,
                                                JobDescriptionDO job,
                                                String querySeed) {
-        String hydeQuery = limitText(querySeed, QUERY_MAX_LENGTH);
+        String hydeQuery = buildHydeQuery(scenario, resumeVersion, job, querySeed);
         List<CareerRetrievalEvidence> evidence = new ArrayList<>();
         evidence.add(CareerRetrievalEvidence.builder()
                 .type(CareerRetrievalEvidenceType.HYDE_QUERY)
@@ -100,6 +101,29 @@ public class CareerRetrievalEnhancementServiceImpl implements CareerRetrievalEnh
         return new CareerRetrievalEnhancement(scenario, hydeQuery, evidence);
     }
 
+    /**
+     * 优先使用 LLM 生成的 HyDE 虚拟画像；生成器缺失、异常或空白时降级到原始 query seed。
+     */
+    private String buildHydeQuery(CareerRetrievalScenario scenario,
+                                  ResumeVersionDO resumeVersion,
+                                  JobDescriptionDO job,
+                                  String querySeed) {
+        String seedQuery = limitText(querySeed, QUERY_MAX_LENGTH);
+        CareerHydeQueryGenerator hydeQueryGenerator = hydeQueryGeneratorProvider.getIfAvailable();
+        if (hydeQueryGenerator == null) {
+            return seedQuery;
+        }
+        try {
+            String generatedQuery = limitText(
+                    hydeQueryGenerator.generate(scenario, resumeVersion, job, seedQuery),
+                    QUERY_MAX_LENGTH);
+            return StrUtil.isBlank(generatedQuery) ? seedQuery : generatedQuery;
+        } catch (RuntimeException ex) {
+            log.warn("Career HyDE query generation failed, degraded to seed: {}", ex.getMessage());
+            return seedQuery;
+        }
+    }
+
     private List<CareerRetrievalEvidence> retrieveKnowledge(String hydeQuery) {
         RetrieverService retrieverService = retrieverServiceProvider.getIfAvailable();
         if (retrieverService == null || StrUtil.isBlank(hydeQuery)) {
@@ -108,7 +132,7 @@ public class CareerRetrievalEnhancementServiceImpl implements CareerRetrievalEnh
         try {
             List<RetrievedChunk> chunks = retrieverService.retrieve(RetrieveRequest.builder()
                     .query(hydeQuery)
-                    .topK(TOP_K)
+                    .topK(TOP_N * OVER_RETRIEVAL_MULTIPLIER)
                     .build());
             if (chunks == null || chunks.isEmpty()) {
                 return List.of();
