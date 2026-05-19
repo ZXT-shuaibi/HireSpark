@@ -93,6 +93,9 @@ class CandidateProfileExportTest {
     @Mock
     private FileStorageService fileStorageService;
 
+    /**
+     * 清理用户上下文和事务同步状态，避免测试之间互相影响。
+     */
     @AfterEach
     void tearDown() {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
@@ -102,6 +105,9 @@ class CandidateProfileExportTest {
         UserContext.clear();
     }
 
+    /**
+     * 校验 Markdown 导出会上传原始 Markdown 内容并记录成功状态。
+     */
     @Test
     void exportMarkdownUploadsMarkdownContentAndRecordsSuccess() {
         UserContext.set(LoginUser.builder().userId("user-1").username("alice").build());
@@ -135,6 +141,9 @@ class CandidateProfileExportTest {
         assertEquals("# Alice", new String(contentCaptor.getValue(), StandardCharsets.UTF_8));
     }
 
+    /**
+     * 校验 HTML 导出会走 Markdown 转 HTML 的渲染管线。
+     */
     @Test
     void exportHtmlWrapsMarkdownContent() {
         UserContext.set(LoginUser.builder().userId("user-1").username("alice").build());
@@ -153,32 +162,68 @@ class CandidateProfileExportTest {
         verify(fileStorageService).upload(eq("career-resume-export"), contentCaptor.capture(), eq("resume-version-1.html"), eq("text/html"));
         String html = new String(contentCaptor.getValue(), StandardCharsets.UTF_8);
         org.assertj.core.api.Assertions.assertThat(html)
-                .contains("<!doctype html>", "<pre># Alice</pre>");
+                .contains("<!DOCTYPE html>", "<h1>Alice</h1>");
     }
 
+    /**
+     * 校验 PDF 导出会上传真实 PDF 二进制内容和正确元数据。
+     */
     @Test
-    void exportPdfAndWordCreateFailedRecordWithDisabledReasonBeforeUploading() {
+    void exportPdfUploadsRenderedPdfWithCorrectMetadata() {
         UserContext.set(LoginUser.builder().userId("user-1").username("alice").build());
         when(resumeVersionMapper.selectOne(anyWrapper())).thenReturn(resumeVersion());
+        when(fileStorageService.upload(eq("career-resume-export"), any(byte[].class), anyString(), eq("application/pdf")))
+                .thenReturn(StoredFileDTO.builder().url("s3://career-resume-export/resume.pdf").build());
         doAnswer(invocation -> {
             ResumeExportRecordDO record = invocation.getArgument(0);
-            record.setId("export-disabled-" + record.getExportType());
+            record.setId("export-pdf");
             return 1;
         }).when(resumeExportRecordMapper).insert(any(ResumeExportRecordDO.class));
 
         CareerResumeExportVO pdf = newService().export(exportRequest("PDF"));
-        CareerResumeExportVO word = newService().export(exportRequest("WORD"));
 
-        assertEquals("FAILED", pdf.getStatus());
-        assertEquals("PDF renderer is not enabled", pdf.getErrorMessage());
-        assertEquals("FAILED", word.getStatus());
-        assertEquals("WORD renderer is not enabled", word.getErrorMessage());
+        assertEquals("SUCCESS", pdf.getStatus());
+        assertNull(pdf.getErrorMessage());
         assertEquals(ResumeRenderPipeline.TEMPLATE_VERSION, pdf.getTemplateVersion());
-        verify(fileStorageService, never()).upload(anyString(), any(byte[].class), anyString(), anyString());
-        verify(resumeExportRecordMapper, times(2)).insert(any(ResumeExportRecordDO.class));
-        verify(resumeExportRecordMapper, times(2)).updateById(any(ResumeExportRecordDO.class));
+        ArgumentCaptor<byte[]> contentCaptor = ArgumentCaptor.forClass(byte[].class);
+        verify(fileStorageService).upload(eq("career-resume-export"), contentCaptor.capture(), eq("resume-version-1.pdf"), eq("application/pdf"));
+        assertEquals("%PDF", new String(contentCaptor.getValue(), 0, 4, StandardCharsets.US_ASCII));
+        verify(resumeExportRecordMapper).insert(any(ResumeExportRecordDO.class));
+        verify(resumeExportRecordMapper).updateById(any(ResumeExportRecordDO.class));
     }
 
+    /**
+     * 校验 Word 导出会上传真实 DOCX 二进制内容和正确元数据。
+     */
+    @Test
+    void exportWordUploadsRenderedDocxWithCorrectMetadata() {
+        UserContext.set(LoginUser.builder().userId("user-1").username("alice").build());
+        when(resumeVersionMapper.selectOne(anyWrapper())).thenReturn(resumeVersion());
+        when(fileStorageService.upload(eq("career-resume-export"), any(byte[].class), anyString(),
+                eq("application/vnd.openxmlformats-officedocument.wordprocessingml.document")))
+                .thenReturn(StoredFileDTO.builder().url("s3://career-resume-export/resume.docx").build());
+        doAnswer(invocation -> {
+            ResumeExportRecordDO record = invocation.getArgument(0);
+            record.setId("export-word");
+            return 1;
+        }).when(resumeExportRecordMapper).insert(any(ResumeExportRecordDO.class));
+
+        CareerResumeExportVO word = newService().export(exportRequest("WORD"));
+
+        assertEquals("SUCCESS", word.getStatus());
+        assertNull(word.getErrorMessage());
+        assertEquals(ResumeRenderPipeline.TEMPLATE_VERSION, word.getTemplateVersion());
+        ArgumentCaptor<byte[]> contentCaptor = ArgumentCaptor.forClass(byte[].class);
+        verify(fileStorageService).upload(eq("career-resume-export"), contentCaptor.capture(), eq("resume-version-1.docx"),
+                eq("application/vnd.openxmlformats-officedocument.wordprocessingml.document"));
+        assertEquals("PK", new String(contentCaptor.getValue(), 0, 2, StandardCharsets.US_ASCII));
+        verify(resumeExportRecordMapper).insert(any(ResumeExportRecordDO.class));
+        verify(resumeExportRecordMapper).updateById(any(ResumeExportRecordDO.class));
+    }
+
+    /**
+     * 校验上传失败时导出记录会被标记为失败。
+     */
     @Test
     void exportMarksRecordFailedWhenUploadFails() {
         UserContext.set(LoginUser.builder().userId("user-1").username("alice").build());
@@ -199,6 +244,9 @@ class CandidateProfileExportTest {
         assertEquals("upload failed", recordCaptor.getValue().getErrorMessage());
     }
 
+    /**
+     * 校验成功记录回写失败时会清理已上传的孤儿文件。
+     */
     @Test
     void exportDeletesUploadedFileWhenSuccessRecordUpdateFails() {
         UserContext.set(LoginUser.builder().userId("user-1").username("alice").build());
@@ -218,6 +266,9 @@ class CandidateProfileExportTest {
         verify(fileStorageService).deleteByUrl("s3://career-resume-export/orphan.md");
     }
 
+    /**
+     * 校验孤儿文件清理成功后失败记录会清空文件地址。
+     */
     @Test
     void exportClearsFileUrlWhenUploadedFileIsCleanedAfterSuccessRecordUpdateFails() {
         UserContext.set(LoginUser.builder().userId("user-1").username("alice").build());
@@ -252,6 +303,9 @@ class CandidateProfileExportTest {
         assertNull(updateSnapshots.get(1).getFileUrl());
     }
 
+    /**
+     * 校验孤儿文件清理失败时会保留文件地址并透出原始异常。
+     */
     @Test
     void exportKeepsFileUrlWhenUploadedFileCleanupFailsAfterSuccessRecordUpdateFails() {
         UserContext.set(LoginUser.builder().userId("user-1").username("alice").build());
@@ -290,6 +344,9 @@ class CandidateProfileExportTest {
         assertEquals("s3://career-resume-export/not-cleaned.md", updateSnapshots.get(1).getFileUrl());
     }
 
+    /**
+     * 校验删除简历版本时会同步失效导出记录并删除文件。
+     */
     @Test
     void deleteVersionInvalidatesExportFilesAndRecords() {
         UserContext.set(LoginUser.builder().userId("user-1").username("alice").build());
@@ -325,6 +382,9 @@ class CandidateProfileExportTest {
         inOrder.verify(fileStorageService).deleteByUrl("s3://career-resume-export/resume.md");
     }
 
+    /**
+     * 校验事务提交后再清理导出文件，且单个文件失败不影响后续清理。
+     */
     @Test
     void deleteVersionDefersExportFileCleanupAndContinuesWhenPostCommitCleanupFails() {
         UserContext.set(LoginUser.builder().userId("user-1").username("alice").build());
@@ -364,6 +424,9 @@ class CandidateProfileExportTest {
         verify(fileStorageService).deleteByUrl("s3://career-resume-export/second.md");
     }
 
+    /**
+     * 构造导出请求对象。
+     */
     private CareerResumeExportRequest exportRequest(String exportType) {
         CareerResumeExportRequest request = new CareerResumeExportRequest();
         request.setResumeVersionId("version-1");
@@ -371,6 +434,9 @@ class CandidateProfileExportTest {
         return request;
     }
 
+    /**
+     * 构造可导出的简历版本。
+     */
     private ResumeVersionDO resumeVersion() {
         return ResumeVersionDO.builder()
                 .id("version-1")
@@ -383,6 +449,9 @@ class CandidateProfileExportTest {
                 .build();
     }
 
+    /**
+     * 构造候选人简历服务实例。
+     */
     private CandidateProfileServiceImpl newService() {
         return new CandidateProfileServiceImpl(
                 candidateProfileMapper,
@@ -397,11 +466,17 @@ class CandidateProfileExportTest {
         );
     }
 
+    /**
+     * 构造任意简历版本查询条件匹配器。
+     */
     @SuppressWarnings("unchecked")
     private Wrapper<ResumeVersionDO> anyWrapper() {
         return (Wrapper<ResumeVersionDO>) any(Wrapper.class);
     }
 
+    /**
+     * 构造任意导出记录查询条件匹配器。
+     */
     @SuppressWarnings("unchecked")
     private Wrapper<ResumeExportRecordDO> anyExportRecordWrapper() {
         return (Wrapper<ResumeExportRecordDO>) any(Wrapper.class);

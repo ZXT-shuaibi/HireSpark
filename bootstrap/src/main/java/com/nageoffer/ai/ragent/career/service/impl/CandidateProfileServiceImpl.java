@@ -37,6 +37,7 @@ import com.nageoffer.ai.ragent.career.service.CandidateProfileService;
 import com.nageoffer.ai.ragent.career.service.parser.CareerJsonParser;
 import com.nageoffer.ai.ragent.career.service.parser.ResumeTextExtractor;
 import com.nageoffer.ai.ragent.career.service.prompt.CareerPromptTemplates;
+import com.nageoffer.ai.ragent.career.service.render.ResumeRenderOutput;
 import com.nageoffer.ai.ragent.career.service.render.ResumeRenderPipeline;
 import com.nageoffer.ai.ragent.career.service.render.ResumeRenderValidationResult;
 import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightLlmService;
@@ -57,7 +58,6 @@ import org.springframework.transaction.support.TransactionSynchronizationManager
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
@@ -252,7 +252,7 @@ public class CandidateProfileServiceImpl implements CandidateProfileService {
             if (!validation.valid() || !validation.rendererEnabled()) {
                 throw new ClientException(firstNotBlank(validation.disabledReason(), "Resume render validation failed"));
             }
-            ExportPayload payload = buildExportPayload(version, exportType);
+            ResumeRenderOutput payload = resumeRenderPipeline.render(version, exportType);
             StoredFileDTO stored = fileStorageService.upload(
                     exportBucketName,
                     payload.content(),
@@ -349,30 +349,6 @@ public class CandidateProfileServiceImpl implements CandidateProfileService {
                 .filter(Objects::nonNull)
                 .max(Integer::compareTo)
                 .orElse(0) + 1;
-    }
-
-    private ExportPayload buildExportPayload(ResumeVersionDO version, String exportType) {
-        String markdown = firstNotBlank(version.getMarkdownContent(), version.getContentJson());
-        if (StrUtil.isBlank(markdown)) {
-            throw new ClientException("Resume export content is empty");
-        }
-        if (EXPORT_TYPE_HTML.equals(exportType)) {
-            String html = "<!doctype html><html><head><meta charset=\"utf-8\"><title>"
-                    + escapeHtml(firstNotBlank(version.getTitle(), "Resume"))
-                    + "</title></head><body><pre>"
-                    + escapeHtml(markdown)
-                    + "</pre></body></html>";
-            return new ExportPayload(
-                    ("resume-" + version.getId() + ".html"),
-                    "text/html",
-                    html.getBytes(StandardCharsets.UTF_8)
-            );
-        }
-        return new ExportPayload(
-                ("resume-" + version.getId() + ".md"),
-                "text/markdown",
-                markdown.getBytes(StandardCharsets.UTF_8)
-        );
     }
 
     private String normalizeExportType(String exportType) {
@@ -542,17 +518,6 @@ public class CandidateProfileServiceImpl implements CandidateProfileService {
                 StrUtil.blankToDefault(prompt, ""));
     }
 
-    private String escapeHtml(String value) {
-        if (value == null) {
-            return "";
-        }
-        return value.replace("&", "&amp;")
-                .replace("<", "&lt;")
-                .replace(">", "&gt;")
-                .replace("\"", "&quot;")
-                .replace("'", "&#39;");
-    }
-
     private String trimError(RuntimeException ex) {
         String message = ex.getMessage();
         if (StrUtil.isBlank(message)) {
@@ -561,6 +526,4 @@ public class CandidateProfileServiceImpl implements CandidateProfileService {
         return message.length() > 1000 ? message.substring(0, 1000) : message;
     }
 
-    private record ExportPayload(String fileName, String contentType, byte[] content) {
-    }
 }
