@@ -34,9 +34,19 @@ public class CareerSingleFlightProperties {
     private boolean enabled = true;
 
     /**
+     * single-flight 运行模式：本地、分布式或混合降级。
+     */
+    private CareerSingleFlightMode mode = CareerSingleFlightMode.HYBRID;
+
+    /**
      * owner 心跳超过该时间后允许新请求接管。
      */
     private Duration ownerTimeout = Duration.ofMinutes(2);
+
+    /**
+     * owner 执行 AI 调用期间的心跳刷新间隔。
+     */
+    private Duration heartbeatInterval = Duration.ofSeconds(3);
 
     /**
      * follower 等待 owner 结果回放的最长时间。
@@ -54,10 +64,29 @@ public class CareerSingleFlightProperties {
     private Duration redisTtl = Duration.ofMinutes(10);
 
     /**
+     * 本地 L1 成功回放缓存的保留时间。
+     */
+    private Duration localReplayTtl = Duration.ofSeconds(30);
+
+    /**
+     * 返回当前生效的 single-flight 运行模式。
+     */
+    public CareerSingleFlightMode effectiveMode() {
+        return mode == null ? CareerSingleFlightMode.HYBRID : mode;
+    }
+
+    /**
      * 返回 owner 超时毫秒数，保证传给 Lua 的值为正数。
      */
     public long ownerTimeoutMillis() {
         return positiveMillis(ownerTimeout, Duration.ofMinutes(2));
+    }
+
+    /**
+     * 返回 owner 心跳刷新间隔毫秒数。
+     */
+    public long heartbeatIntervalMillis() {
+        return positiveMillis(heartbeatInterval, Duration.ofSeconds(3));
     }
 
     /**
@@ -79,6 +108,13 @@ public class CareerSingleFlightProperties {
      */
     public long redisTtlMillis() {
         return positiveMillis(redisTtl, Duration.ofMinutes(10));
+    }
+
+    /**
+     * 返回本地 L1 成功回放 TTL 毫秒数。
+     */
+    public long localReplayTtlMillis() {
+        return positiveMillis(localReplayTtl, Duration.ofSeconds(30));
     }
 
     private long positiveMillis(Duration duration, Duration fallback) {

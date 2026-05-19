@@ -52,6 +52,8 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
     private final CareerTaskAttemptRecorder attemptRecorder;
     private final CareerAiGuardService aiGuardService;
     private final CareerSingleFlightProperties singleFlightProperties;
+    private final CareerSingleFlightLocalReplayCache localReplayCache;
+    private final CareerSingleFlightHeartbeatManager heartbeatManager;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
@@ -61,23 +63,50 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
                                             LLMService llmService,
                                             CareerTaskAttemptRecorder attemptRecorder,
                                             CareerAiGuardService aiGuardService) {
-        this(singleFlightService, llmService, attemptRecorder, aiGuardService, new CareerSingleFlightProperties());
+        this(singleFlightService,
+                llmService,
+                attemptRecorder,
+                aiGuardService,
+                new CareerSingleFlightProperties(),
+                new CareerSingleFlightLocalReplayCache(),
+                new CareerSingleFlightHeartbeatManager());
     }
 
     /**
      * 创建可自定义等待参数的 single-flight LLM 包装器。
+     */
+    public CareerSingleFlightLlmServiceImpl(CareerSingleFlightService singleFlightService,
+                                            LLMService llmService,
+                                            CareerTaskAttemptRecorder attemptRecorder,
+                                            CareerAiGuardService aiGuardService,
+                                            CareerSingleFlightProperties singleFlightProperties) {
+        this(singleFlightService,
+                llmService,
+                attemptRecorder,
+                aiGuardService,
+                singleFlightProperties,
+                new CareerSingleFlightLocalReplayCache(),
+                new CareerSingleFlightHeartbeatManager());
+    }
+
+    /**
+     * 创建带本地 L1 回放和持续心跳续租的 single-flight LLM 包装器。
      */
     @Autowired
     public CareerSingleFlightLlmServiceImpl(CareerSingleFlightService singleFlightService,
                                             LLMService llmService,
                                             CareerTaskAttemptRecorder attemptRecorder,
                                             CareerAiGuardService aiGuardService,
-                                            CareerSingleFlightProperties singleFlightProperties) {
+                                            CareerSingleFlightProperties singleFlightProperties,
+                                            CareerSingleFlightLocalReplayCache localReplayCache,
+                                            CareerSingleFlightHeartbeatManager heartbeatManager) {
         this.singleFlightService = singleFlightService;
         this.llmService = llmService;
         this.attemptRecorder = attemptRecorder;
         this.aiGuardService = aiGuardService;
         this.singleFlightProperties = singleFlightProperties == null ? new CareerSingleFlightProperties() : singleFlightProperties;
+        this.localReplayCache = localReplayCache == null ? new CareerSingleFlightLocalReplayCache() : localReplayCache;
+        this.heartbeatManager = heartbeatManager == null ? new CareerSingleFlightHeartbeatManager() : heartbeatManager;
     }
 
     /**
@@ -86,7 +115,7 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
     @Override
     public String chat(String scene, String singleFlightKey, String traceId, ChatRequest request) {
         String key = stableKey(scene, singleFlightKey);
-        Optional<CareerSingleFlightRecordDO> replay = singleFlightService.replayIfAvailable(key);
+        Optional<CareerSingleFlightRecordDO> replay = findReplay(key);
         if (replay.isPresent()) {
             attemptRecorder.replayed(scene, singleFlightKey, key, traceId, request);
             return unwrapResult(replay.get().getResultJson());
@@ -97,6 +126,7 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
                 singleFlightService.tryAcquire(scene, key, ownerId, traceId);
         CareerSingleFlightRecordDO record = acquireResult.record();
         if (acquireResult.replayAvailable() && record != null) {
+            cacheReplay(record);
             attemptRecorder.replayed(scene, singleFlightKey, key, traceId, request);
             return unwrapResult(record.getResultJson());
         }
@@ -115,8 +145,14 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
         long fencingToken = record == null || record.getFencingToken() == null ? 0L : record.getFencingToken();
         CareerTaskAttemptDO attempt = attemptRecorder.start(scene, singleFlightKey, key, traceId, request);
         long startTime = System.currentTimeMillis();
+        String heartbeatTaskKey = null;
         try {
-            singleFlightService.heartbeat(key, ownerId, fencingToken);
+            ensureOwnerHeartbeat(key, ownerId, fencingToken);
+            heartbeatTaskKey = heartbeatManager.start(key,
+                    ownerId,
+                    fencingToken,
+                    singleFlightProperties.heartbeatIntervalMillis(),
+                    () -> singleFlightService.heartbeat(key, ownerId, fencingToken));
             String result = aiGuardService.execute(scene, () -> llmService.chat(request));
             completeOwnerSuccess(key, ownerId, fencingToken, result);
             attemptRecorder.success(attempt, System.currentTimeMillis() - startTime);
@@ -125,20 +161,54 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
             completeOwnerFailure(key, ownerId, fencingToken, ex);
             attemptRecorder.failed(attempt, ex, System.currentTimeMillis() - startTime);
             throw ex;
+        } finally {
+            heartbeatManager.stop(heartbeatTaskKey);
         }
     }
 
     /**
-     * 在 follower 等待窗口内轮询 single-flight 回放结果。
+     * 按“本地 L1 -> single-flight 服务”的顺序查找成功回放。
+     */
+    private Optional<CareerSingleFlightRecordDO> findReplay(String key) {
+        Optional<CareerSingleFlightRecordDO> localReplay = localReplayCache.get(key);
+        if (localReplay.isPresent()) {
+            return localReplay;
+        }
+        Optional<CareerSingleFlightRecordDO> replay = singleFlightService.replayIfAvailable(key);
+        replay.ifPresent(this::cacheReplay);
+        return replay;
+    }
+
+    /**
+     * 执行 owner 首次同步心跳，确认 fencing token 仍然有效。
+     */
+    private void ensureOwnerHeartbeat(String key, String ownerId, long fencingToken) {
+        if (!singleFlightService.heartbeat(key, ownerId, fencingToken)) {
+            throw new ServiceException("AI single-flight owner lost before model execution");
+        }
+    }
+
+    /**
+     * 将成功回放写入本地 L1 缓存。
+     */
+    private void cacheReplay(CareerSingleFlightRecordDO record) {
+        if (record == null) {
+            return;
+        }
+        localReplayCache.putSuccess(record.getSingleFlightKey(), record, singleFlightProperties.localReplayTtlMillis());
+    }
+
+    /**
+     * 在 follower 等待窗口内轮询本地 L1 和 single-flight 回放结果。
      */
     private Optional<CareerSingleFlightRecordDO> waitForReplay(String key) {
         long waitTimeoutMillis = singleFlightProperties.waitTimeoutMillis();
         long pollIntervalMillis = singleFlightProperties.pollIntervalMillis();
         long deadline = System.currentTimeMillis() + waitTimeoutMillis;
-        Optional<CareerSingleFlightRecordDO> replay = singleFlightService.replayIfAvailable(key);
+        Optional<CareerSingleFlightRecordDO> replay = findReplay(key);
         while (replay.isEmpty() && System.currentTimeMillis() < deadline) {
             sleepQuietly(pollIntervalMillis);
-            replay = singleFlightService.replayIfAvailable(key);
+            replay = findReplay(key);
         }
         return replay;
     }
@@ -146,8 +216,12 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
     /**
      * 完成 owner 成功状态，若 fencing token 已失效则阻止旧 owner 返回不可回放结果。
      */
-    private void completeOwnerSuccess(String key, String ownerId, long fencingToken, String result) {
-        boolean completed = singleFlightService.completeSuccess(key, ownerId, fencingToken, wrapResult(result));
+    private void completeOwnerSuccess(String key,
+                                      String ownerId,
+                                      long fencingToken,
+                                      String result) {
+        String resultJson = wrapResult(result);
+        boolean completed = singleFlightService.completeSuccess(key, ownerId, fencingToken, resultJson);
         if (!completed) {
             throw new ServiceException("AI single-flight owner lost before success completion");
         }
@@ -157,9 +231,15 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
      * 完成 owner 失败状态，若 owner 已被接管则仅记录日志。
      */
     private void completeOwnerFailure(String key, String ownerId, long fencingToken, RuntimeException ex) {
-        boolean completed = singleFlightService.completeFailure(key, ownerId, fencingToken, errorType(ex));
-        if (!completed) {
-            log.warn("AI single-flight owner lost before failure completion: key={}, errorType={}", key, errorType(ex));
+        String errorType = errorType(ex);
+        try {
+            boolean completed = singleFlightService.completeFailure(key, ownerId, fencingToken, errorType);
+            if (!completed) {
+                log.warn("AI single-flight owner lost before failure completion: key={}, errorType={}", key, errorType);
+            }
+        } catch (RuntimeException completionEx) {
+            log.warn("AI single-flight failure completion failed, original exception will be preserved: key={}, errorType={}",
+                    key, errorType, completionEx);
         }
     }
 

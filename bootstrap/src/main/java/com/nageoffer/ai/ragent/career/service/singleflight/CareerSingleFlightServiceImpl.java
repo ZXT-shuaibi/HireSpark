@@ -22,6 +22,7 @@ import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.nageoffer.ai.ragent.career.dao.entity.CareerSingleFlightRecordDO;
 import com.nageoffer.ai.ragent.career.dao.mapper.CareerSingleFlightRecordMapper;
 import com.nageoffer.ai.ragent.framework.exception.ClientException;
+import com.nageoffer.ai.ragent.framework.exception.ServiceException;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DuplicateKeyException;
@@ -45,24 +46,36 @@ public class CareerSingleFlightServiceImpl implements CareerSingleFlightService 
     private final CareerSingleFlightRecordMapper recordMapper;
     private final CareerSingleFlightRedisCoordinator redisCoordinator;
     private final CareerSingleFlightProperties properties;
+    private final CareerSingleFlightLocalReplayCache localReplayCache;
 
     /**
      * 创建仅依赖数据库的 single-flight 服务，便于测试或 Redis 不可用时兜底。
      */
     public CareerSingleFlightServiceImpl(CareerSingleFlightRecordMapper recordMapper) {
-        this(recordMapper, null, new CareerSingleFlightProperties());
+        this(recordMapper, null, new CareerSingleFlightProperties(), new CareerSingleFlightLocalReplayCache());
     }
 
     /**
      * 创建支持 Redis 协调的 single-flight 服务。
      */
-    @Autowired
     public CareerSingleFlightServiceImpl(CareerSingleFlightRecordMapper recordMapper,
                                          CareerSingleFlightRedisCoordinator redisCoordinator,
                                          CareerSingleFlightProperties properties) {
+        this(recordMapper, redisCoordinator, properties, new CareerSingleFlightLocalReplayCache());
+    }
+
+    /**
+     * 创建支持 Redis 协调和本地 L1 回放缓存的 single-flight 服务。
+     */
+    @Autowired
+    public CareerSingleFlightServiceImpl(CareerSingleFlightRecordMapper recordMapper,
+                                         CareerSingleFlightRedisCoordinator redisCoordinator,
+                                         CareerSingleFlightProperties properties,
+                                         CareerSingleFlightLocalReplayCache localReplayCache) {
         this.recordMapper = recordMapper;
         this.redisCoordinator = redisCoordinator;
         this.properties = properties == null ? new CareerSingleFlightProperties() : properties;
+        this.localReplayCache = localReplayCache == null ? new CareerSingleFlightLocalReplayCache() : localReplayCache;
     }
 
     /**
@@ -73,12 +86,16 @@ public class CareerSingleFlightServiceImpl implements CareerSingleFlightService 
     public AcquireResult tryAcquire(String scene, String singleFlightKey, String ownerId, String traceId) {
         String key = requireKey(singleFlightKey);
         String owner = StrUtil.blankToDefault(ownerId, UUID.randomUUID().toString());
+        Optional<CareerSingleFlightRecordDO> localReplay = readLocalReplay(key);
+        if (localReplay.isPresent()) {
+            return new AcquireResult(false, true, localReplay.get());
+        }
         if (useRedis()) {
             Optional<CareerSingleFlightRedisCoordinator.RedisState> state;
             try {
                 state = redisCoordinator.acquire(scene, key, owner, traceId);
             } catch (RuntimeException ex) {
-                log.warn("Redis single-flight acquire 失败，回退数据库实现：key={}", key, ex);
+                handleRedisFailure("acquire", key, ex);
                 state = Optional.empty();
             }
             if (state.isPresent()) {
@@ -119,6 +136,7 @@ public class CareerSingleFlightServiceImpl implements CareerSingleFlightService 
         existing.setRequestCount((existing.getRequestCount() == null ? 0 : existing.getRequestCount()) + 1);
         if (STATUS_SUCCESS.equals(existing.getStatus())) {
             recordMapper.updateById(existing);
+            cacheSuccessRecord(existing);
             return new AcquireResult(false, true, existing);
         }
         if (STATUS_FAILED.equals(existing.getStatus())) {
@@ -158,7 +176,7 @@ public class CareerSingleFlightServiceImpl implements CareerSingleFlightService 
             try {
                 result = redisCoordinator.heartbeat(key, ownerId, fencingToken);
             } catch (RuntimeException ex) {
-                log.warn("Redis single-flight heartbeat 失败，回退数据库实现：key={}", key, ex);
+                handleRedisFailure("heartbeat", key, ex);
                 result = Optional.empty();
             }
             if (result.isPresent()) {
@@ -189,7 +207,7 @@ public class CareerSingleFlightServiceImpl implements CareerSingleFlightService 
             try {
                 result = redisCoordinator.completeSuccess(key, ownerId, fencingToken, resultJson);
             } catch (RuntimeException ex) {
-                log.warn("Redis single-flight completeSuccess 失败，回退数据库实现：key={}", key, ex);
+                handleRedisFailure("completeSuccess", key, ex);
                 result = Optional.empty();
             }
             if (result.isPresent()) {
@@ -208,6 +226,7 @@ public class CareerSingleFlightServiceImpl implements CareerSingleFlightService 
         record.setErrorType(null);
         record.setHeartbeatTime(new Date());
         recordMapper.updateById(record);
+        cacheSuccessRecord(record);
         return true;
     }
 
@@ -223,7 +242,7 @@ public class CareerSingleFlightServiceImpl implements CareerSingleFlightService 
             try {
                 result = redisCoordinator.completeFailure(key, ownerId, fencingToken, errorType);
             } catch (RuntimeException ex) {
-                log.warn("Redis single-flight completeFailure 失败，回退数据库实现：key={}", key, ex);
+                handleRedisFailure("completeFailure", key, ex);
                 result = Optional.empty();
             }
             if (result.isPresent()) {
@@ -251,12 +270,16 @@ public class CareerSingleFlightServiceImpl implements CareerSingleFlightService 
     @Override
     public Optional<CareerSingleFlightRecordDO> replayIfAvailable(String singleFlightKey) {
         String key = requireKey(singleFlightKey);
+        Optional<CareerSingleFlightRecordDO> localReplay = readLocalReplay(key);
+        if (localReplay.isPresent()) {
+            return localReplay;
+        }
         if (useRedis()) {
             Optional<CareerSingleFlightRedisCoordinator.RedisState> state;
             try {
                 state = redisCoordinator.replayIfAvailable(key);
             } catch (RuntimeException ex) {
-                log.warn("Redis single-flight replay 失败，回退数据库实现：key={}", key, ex);
+                handleRedisFailure("replay", key, ex);
                 state = null;
             }
             if (state != null) {
@@ -267,6 +290,7 @@ public class CareerSingleFlightServiceImpl implements CareerSingleFlightService 
         if (record == null || !STATUS_SUCCESS.equals(record.getStatus()) || StrUtil.isBlank(record.getResultJson())) {
             return Optional.empty();
         }
+        cacheSuccessRecord(record);
         return Optional.of(record);
     }
 
@@ -309,7 +333,51 @@ public class CareerSingleFlightServiceImpl implements CareerSingleFlightService 
      * 判断当前是否启用 Redis 作为 single-flight 协调源。
      */
     private boolean useRedis() {
-        return properties != null && properties.isEnabled() && redisCoordinator != null;
+        if (properties == null || !properties.isEnabled() || properties.effectiveMode() == CareerSingleFlightMode.LOCAL) {
+            return false;
+        }
+        if (redisCoordinator != null) {
+            return true;
+        }
+        if (properties.effectiveMode() == CareerSingleFlightMode.DISTRIBUTED) {
+            throw new ServiceException("Distributed single-flight requires Redis coordinator");
+        }
+        return false;
+    }
+
+    /**
+     * 处理 Redis 协调失败，HYBRID 模式回退数据库，DISTRIBUTED 模式直接暴露异常。
+     */
+    private void handleRedisFailure(String operation, String key, RuntimeException ex) {
+        if (properties != null && properties.effectiveMode() == CareerSingleFlightMode.DISTRIBUTED) {
+            throw ex;
+        }
+        log.warn("Redis single-flight {} 失败，HYBRID 回退数据库实现：key={}", operation, key, ex);
+    }
+
+    /**
+     * 从本地 L1 读取成功回放，并尽力补齐数据库审计账本。
+     */
+    private Optional<CareerSingleFlightRecordDO> readLocalReplay(String key) {
+        Optional<CareerSingleFlightRecordDO> replay = localReplayCache.get(key);
+        replay.ifPresent(record -> {
+            try {
+                syncAuditRecord(record);
+            } catch (RuntimeException ex) {
+                log.warn("同步本地 single-flight 回放审计失败，继续使用 L1 回放：key={}", key, ex);
+            }
+        });
+        return replay;
+    }
+
+    /**
+     * 将成功结果写入本地 L1 回放缓存。
+     */
+    private void cacheSuccessRecord(CareerSingleFlightRecordDO record) {
+        if (record == null) {
+            return;
+        }
+        localReplayCache.putSuccess(record.getSingleFlightKey(), record, properties.localReplayTtlMillis());
     }
 
     /**
@@ -322,6 +390,7 @@ public class CareerSingleFlightServiceImpl implements CareerSingleFlightService 
         } catch (RuntimeException ex) {
             log.warn("同步 single-flight 审计账本失败，保留 Redis 权威状态：key={}", state.singleFlightKey(), ex);
         }
+        cacheSuccessRecord(record);
         return record;
     }
 
@@ -442,6 +511,7 @@ public class CareerSingleFlightServiceImpl implements CareerSingleFlightService 
                     .requestCount(1)
                     .build();
             recordMapper.insert(record);
+            cacheSuccessRecord(record);
             return;
         }
         record.setOwnerId(ownerId);
@@ -451,6 +521,7 @@ public class CareerSingleFlightServiceImpl implements CareerSingleFlightService 
         record.setErrorType(null);
         record.setHeartbeatTime(new Date());
         recordMapper.updateById(record);
+        cacheSuccessRecord(record);
     }
 
     /**

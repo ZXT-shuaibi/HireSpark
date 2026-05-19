@@ -28,8 +28,11 @@ import com.nageoffer.ai.ragent.career.service.attempt.CareerTaskAttemptRecorder;
 import com.nageoffer.ai.ragent.career.service.guard.CareerAiGuardProperties;
 import com.nageoffer.ai.ragent.career.service.guard.CareerAiGuardService;
 import com.nageoffer.ai.ragent.career.service.guard.CareerAiGuardTimeoutException;
+import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightHeartbeatManager;
 import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightService;
+import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightLocalReplayCache;
 import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightLlmServiceImpl;
+import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightMode;
 import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightProperties;
 import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightRedisCoordinator;
 import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightServiceImpl;
@@ -57,6 +60,8 @@ import java.util.Date;
 import java.util.HexFormat;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -72,6 +77,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -220,9 +226,6 @@ class CareerSingleFlightTest {
                 .thenReturn(Optional.of(false));
         when(coordinator.completeSuccess("key-redis-fence", "owner-b", 2L, "{\"fresh\":true}"))
                 .thenReturn(Optional.of(true));
-        when(coordinator.replayIfAvailable("key-redis-fence"))
-                .thenReturn(Optional.of(redisState(false, true, "OPTIMIZATION", "key-redis-fence",
-                        "owner-b", 2L, "SUCCESS", "{\"fresh\":true}", null, 2)));
         CareerSingleFlightService service = new CareerSingleFlightServiceImpl(recordMapper, coordinator, properties);
 
         CareerSingleFlightService.AcquireResult first =
@@ -253,6 +256,25 @@ class CareerSingleFlightTest {
         assertTrue(result.owner());
         assertEquals(1, records.size());
         assertEquals("RUNNING", records.get(0).getStatus());
+    }
+
+    @Test
+    void localModeNeverCallsRedisCoordinator() {
+        stubPersistence();
+        CareerSingleFlightRedisCoordinator coordinator = mock(CareerSingleFlightRedisCoordinator.class);
+        CareerSingleFlightProperties properties = newTestSingleFlightProperties();
+        properties.setMode(CareerSingleFlightMode.LOCAL);
+        CareerSingleFlightService service =
+                new CareerSingleFlightServiceImpl(recordMapper, coordinator, properties);
+
+        CareerSingleFlightService.AcquireResult acquired =
+                service.tryAcquire("OPTIMIZATION", "key-local", "owner-local", "trace-local");
+        assertTrue(acquired.owner());
+        assertTrue(service.completeSuccess("key-local", "owner-local", acquired.record().getFencingToken(),
+                "{\"response\":\"local-result\"}"));
+        assertEquals("{\"response\":\"local-result\"}",
+                service.replayIfAvailable("key-local").orElseThrow().getResultJson());
+        verifyNoInteractions(coordinator);
     }
 
     @Test
@@ -310,6 +332,44 @@ class CareerSingleFlightTest {
         assertFalse(attempts.get(0).getReplayed());
         assertEquals("REPLAYED", attempts.get(1).getStatus());
         assertTrue(attempts.get(1).getReplayed());
+    }
+
+    @Test
+    void llmWrapperReadsLocalReplayBeforeSingleFlightService() {
+        stubAttemptPersistence();
+        CareerSingleFlightService service = mock(CareerSingleFlightService.class);
+        CareerSingleFlightProperties properties = newTestSingleFlightProperties();
+        CareerSingleFlightLocalReplayCache localReplayCache = new CareerSingleFlightLocalReplayCache();
+        CareerSingleFlightHeartbeatManager heartbeatManager = new CareerSingleFlightHeartbeatManager();
+        String scene = "OPTIMIZATION_REVIEW";
+        String rawKey = "l1-key";
+        String stableKey = stableWrapperKey(scene, rawKey);
+        localReplayCache.putSuccess(stableKey, CareerSingleFlightRecordDO.builder()
+                .singleFlightKey(stableKey)
+                .scene(scene)
+                .status("SUCCESS")
+                .resultJson("{\"response\":\"l1-result\"}")
+                .build(), properties.localReplayTtlMillis());
+        CareerSingleFlightLlmServiceImpl wrapper = new CareerSingleFlightLlmServiceImpl(
+                service,
+                llmService,
+                new CareerTaskAttemptRecorder(attemptMapper),
+                newGuardService(),
+                properties,
+                localReplayCache,
+                heartbeatManager);
+        try {
+            String result = wrapper.chat(scene, rawKey, "trace-l1",
+                    ChatRequest.builder().messages(List.of(ChatMessage.user("prompt"))).build());
+
+            assertEquals("l1-result", result);
+            verifyNoInteractions(service);
+            verify(llmService, never()).chat(any(ChatRequest.class));
+            assertEquals(1, attempts.size());
+            assertEquals("REPLAYED", attempts.get(0).getStatus());
+        } finally {
+            heartbeatManager.shutdown();
+        }
     }
 
     @Test
@@ -381,8 +441,150 @@ class CareerSingleFlightTest {
     }
 
     /**
+     * 验证 follower 等待期间可以从本地 L1 读取 owner 成功回放。
+     */
+    /**
      * 验证模型空响应在首次调用和回放调用中保持一致的 null 语义。
      */
+    @Test
+    void llmWrapperFollowerWaitReadsLocalReplayCache() {
+        stubAttemptPersistence();
+        CareerSingleFlightProperties properties = newTestSingleFlightProperties();
+        CareerSingleFlightLocalReplayCache localReplayCache = new CareerSingleFlightLocalReplayCache();
+        CareerSingleFlightHeartbeatManager heartbeatManager = new CareerSingleFlightHeartbeatManager();
+        String scene = "INTERVIEW_EVALUATE";
+        String rawKey = "local-follower";
+        CareerSingleFlightService service = new CareerSingleFlightService() {
+            @Override
+            public AcquireResult tryAcquire(String scene, String singleFlightKey, String ownerId, String traceId) {
+                localReplayCache.putSuccess(singleFlightKey, CareerSingleFlightRecordDO.builder()
+                        .singleFlightKey(singleFlightKey)
+                        .scene(scene)
+                        .ownerId("owner-running")
+                        .fencingToken(1L)
+                        .status("SUCCESS")
+                        .resultJson("{\"response\":\"cached-owner-result\"}")
+                        .build(), properties.localReplayTtlMillis());
+                return new AcquireResult(false, false, CareerSingleFlightRecordDO.builder()
+                        .singleFlightKey(singleFlightKey)
+                        .scene(scene)
+                        .ownerId("owner-running")
+                        .fencingToken(1L)
+                        .status("RUNNING")
+                        .heartbeatTime(new Date())
+                        .build());
+            }
+
+            @Override
+            public boolean heartbeat(String singleFlightKey, String ownerId, long fencingToken) {
+                return false;
+            }
+
+            @Override
+            public boolean completeSuccess(String singleFlightKey, String ownerId, long fencingToken, String resultJson) {
+                return false;
+            }
+
+            @Override
+            public boolean completeFailure(String singleFlightKey, String ownerId, long fencingToken, String errorType) {
+                return false;
+            }
+
+            @Override
+            public Optional<CareerSingleFlightRecordDO> replayIfAvailable(String singleFlightKey) {
+                return Optional.empty();
+            }
+        };
+        CareerSingleFlightLlmServiceImpl wrapper = new CareerSingleFlightLlmServiceImpl(
+                service,
+                llmService,
+                new CareerTaskAttemptRecorder(attemptMapper),
+                newGuardService(),
+                properties,
+                localReplayCache,
+                heartbeatManager);
+        try {
+            String result = wrapper.chat(scene, rawKey, "trace-follower-local",
+                    ChatRequest.builder().messages(List.of(ChatMessage.user("prompt"))).build());
+
+            assertEquals("cached-owner-result", result);
+            verify(llmService, never()).chat(any(ChatRequest.class));
+            assertEquals(1, attempts.size());
+            assertEquals("REPLAYED", attempts.get(0).getStatus());
+        } finally {
+            heartbeatManager.shutdown();
+        }
+    }
+
+    @Test
+    void llmWrapperRefreshesHeartbeatDuringLongOwnerCall() {
+        stubAttemptPersistence();
+        CareerSingleFlightProperties properties = newTestSingleFlightProperties();
+        properties.setHeartbeatInterval(Duration.ofMillis(10));
+        CareerSingleFlightLocalReplayCache localReplayCache = new CareerSingleFlightLocalReplayCache();
+        CareerSingleFlightHeartbeatManager heartbeatManager = new CareerSingleFlightHeartbeatManager();
+        AtomicInteger heartbeatCount = new AtomicInteger();
+        CountDownLatch heartbeatLatch = new CountDownLatch(3);
+        CareerSingleFlightService service = new CareerSingleFlightService() {
+            @Override
+            public AcquireResult tryAcquire(String scene, String singleFlightKey, String ownerId, String traceId) {
+                return new AcquireResult(true, false, CareerSingleFlightRecordDO.builder()
+                        .singleFlightKey(singleFlightKey)
+                        .scene(scene)
+                        .ownerId(ownerId)
+                        .fencingToken(1L)
+                        .status("RUNNING")
+                        .heartbeatTime(new Date())
+                        .build());
+            }
+
+            @Override
+            public boolean heartbeat(String singleFlightKey, String ownerId, long fencingToken) {
+                heartbeatCount.incrementAndGet();
+                heartbeatLatch.countDown();
+                return true;
+            }
+
+            @Override
+            public boolean completeSuccess(String singleFlightKey, String ownerId, long fencingToken, String resultJson) {
+                return true;
+            }
+
+            @Override
+            public boolean completeFailure(String singleFlightKey, String ownerId, long fencingToken, String errorType) {
+                return true;
+            }
+
+            @Override
+            public Optional<CareerSingleFlightRecordDO> replayIfAvailable(String singleFlightKey) {
+                return Optional.empty();
+            }
+        };
+        CareerSingleFlightLlmServiceImpl wrapper = new CareerSingleFlightLlmServiceImpl(
+                service,
+                llmService,
+                new CareerTaskAttemptRecorder(attemptMapper),
+                newGuardService(),
+                properties,
+                localReplayCache,
+                heartbeatManager);
+        doAnswer(invocation -> {
+            assertTrue(await(heartbeatLatch, 500L));
+            return "long-owner-result";
+        }).when(llmService).chat(any(ChatRequest.class));
+        try {
+            String result = wrapper.chat("INTERVIEW_EVALUATE", "long-owner", "trace-heartbeat",
+                    ChatRequest.builder().messages(List.of(ChatMessage.user("prompt"))).build());
+
+            assertEquals("long-owner-result", result);
+            assertTrue(heartbeatCount.get() >= 3);
+            assertEquals(1, attempts.size());
+            assertEquals("SUCCESS", attempts.get(0).getStatus());
+        } finally {
+            heartbeatManager.shutdown();
+        }
+    }
+
     @Test
     void llmWrapperReplaysNullModelResultAsNull() {
         stubPersistence();
@@ -577,6 +779,7 @@ class CareerSingleFlightTest {
     private CareerSingleFlightProperties newTestSingleFlightProperties() {
         CareerSingleFlightProperties properties = new CareerSingleFlightProperties();
         properties.setEnabled(true);
+        properties.setMode(CareerSingleFlightMode.HYBRID);
         properties.setOwnerTimeout(Duration.ofMillis(120_000));
         properties.setWaitTimeout(Duration.ofMillis(80));
         properties.setPollInterval(Duration.ofMillis(5));
@@ -620,6 +823,18 @@ class CareerSingleFlightTest {
         } catch (InterruptedException ex) {
             Thread.currentThread().interrupt();
             throw new ServiceException("sleep interrupted");
+        }
+    }
+
+    /**
+     * 等待异步条件达成，避免单测依赖固定睡眠。
+     */
+    private boolean await(CountDownLatch latch, long timeoutMillis) {
+        try {
+            return latch.await(timeoutMillis, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new ServiceException("await interrupted");
         }
     }
 
