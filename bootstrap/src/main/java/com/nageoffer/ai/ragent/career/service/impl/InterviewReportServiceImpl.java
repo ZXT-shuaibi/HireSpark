@@ -28,6 +28,7 @@ import com.nageoffer.ai.ragent.career.dao.mapper.InterviewSessionMapper;
 import com.nageoffer.ai.ragent.career.dao.mapper.InterviewTurnMapper;
 import com.nageoffer.ai.ragent.career.service.InterviewReportService;
 import com.nageoffer.ai.ragent.career.service.prompt.CareerPromptTemplates;
+import com.nageoffer.ai.ragent.career.service.report.CareerRadarComputationService;
 import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightLlmService;
 import com.nageoffer.ai.ragent.framework.context.UserContext;
 import com.nageoffer.ai.ragent.framework.convention.ChatMessage;
@@ -37,6 +38,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -49,6 +51,7 @@ public class InterviewReportServiceImpl implements InterviewReportService {
     private final InterviewReportMapper reportMapper;
     private final InterviewReportSupport interviewReportSupport;
     private final CareerSingleFlightLlmService singleFlightLlmService;
+    private final CareerRadarComputationService careerRadarComputationService;
 
     @Transactional(rollbackFor = Exception.class)
     @Override
@@ -79,6 +82,10 @@ public class InterviewReportServiceImpl implements InterviewReportService {
         int averageScore = interviewReportSupport.averageScore(scoredTurns);
         Integer overallScore = interviewReportSupport.readValidScore(parsed.get("overallScore"));
         List<Object> suggestions = interviewReportSupport.toList(parsed.get("suggestions"));
+        List<Object> radar = new ArrayList<>(careerRadarComputationService.compute(scoredTurns, parsed));
+        if (radar.isEmpty()) {
+            radar = interviewReportSupport.toList(parsed.get("radar"));
+        }
         if (overallScore == null) {
             overallScore = averageScore;
             suggestions = interviewReportSupport.appendFallbackMarker(suggestions, averageScore);
@@ -88,8 +95,7 @@ public class InterviewReportServiceImpl implements InterviewReportService {
                 .sessionId(session.getId())
                 .userId(userId)
                 .overallScore(overallScore)
-                .radarJson(interviewReportSupport.writeJson(
-                        interviewReportSupport.toList(parsed.get("radar")),
+                .radarJson(interviewReportSupport.writeJson(radar,
                         "Failed to serialize interview report radar JSON"))
                 .playbackJson(interviewReportSupport.writeJson(
                         interviewReportSupport.toList(parsed.get("playback")),
@@ -101,7 +107,7 @@ public class InterviewReportServiceImpl implements InterviewReportService {
                 .build();
         reportMapper.insert(report);
         return interviewReportSupport.toReportVO(report,
-                interviewReportSupport.toList(parsed.get("radar")),
+                radar,
                 interviewReportSupport.toList(parsed.get("playback")),
                 suggestions);
     }

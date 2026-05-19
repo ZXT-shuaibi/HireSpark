@@ -21,6 +21,7 @@ import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
 import com.nageoffer.ai.ragent.career.controller.vo.CareerInterviewReportVO;
+import com.nageoffer.ai.ragent.career.controller.vo.CareerRadarItemVO;
 import com.nageoffer.ai.ragent.career.dao.entity.InterviewReportDO;
 import com.nageoffer.ai.ragent.career.dao.entity.InterviewSessionDO;
 import com.nageoffer.ai.ragent.career.dao.entity.InterviewTurnDO;
@@ -30,6 +31,7 @@ import com.nageoffer.ai.ragent.career.dao.mapper.InterviewTurnMapper;
 import com.nageoffer.ai.ragent.career.service.impl.InterviewReportServiceImpl;
 import com.nageoffer.ai.ragent.career.service.impl.InterviewReportSupport;
 import com.nageoffer.ai.ragent.career.service.parser.CareerJsonParser;
+import com.nageoffer.ai.ragent.career.service.report.CareerRadarComputationService;
 import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightLlmService;
 import com.nageoffer.ai.ragent.framework.context.LoginUser;
 import com.nageoffer.ai.ragent.framework.context.UserContext;
@@ -56,6 +58,8 @@ import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
@@ -78,6 +82,9 @@ class InterviewReportAggregationTest {
 
     @Mock
     private CareerSingleFlightLlmService singleFlightLlmService;
+
+    @Mock
+    private CareerRadarComputationService careerRadarComputationService;
 
     private final List<InterviewReportDO> reports = new ArrayList<>();
 
@@ -109,6 +116,14 @@ class InterviewReportAggregationTest {
             reports.add(report);
             return 1;
         });
+        lenient().when(careerRadarComputationService.compute(anyList(), anyMap()))
+                .thenReturn(List.of(CareerRadarItemVO.builder()
+                        .dimension("technical")
+                        .score(88)
+                        .weight(35)
+                        .comment("backend radar")
+                        .source("TEST")
+                        .build()));
 
         CareerInterviewReportVO result = newService().generate("session-1");
 
@@ -118,6 +133,7 @@ class InterviewReportAggregationTest {
         assertEquals(1, reports.size());
         assertEquals(86, reports.get(0).getOverallScore());
         assertTrue(reports.get(0).getSuggestionsJson().contains("AVERAGE_SCORE_FALLBACK"));
+        assertTrue(reports.get(0).getRadarJson().contains("backend radar"));
         assertEquals(2, result.getPlayback().size());
         ArgumentCaptor<ChatRequest> chatCaptor = ArgumentCaptor.forClass(ChatRequest.class);
         verify(singleFlightLlmService).chat(anyString(), anyString(), anyString(), chatCaptor.capture());
@@ -192,7 +208,8 @@ class InterviewReportAggregationTest {
                 turnMapper,
                 reportMapper,
                 new InterviewReportSupport(careerJsonParser),
-                singleFlightLlmService
+                singleFlightLlmService,
+                careerRadarComputationService
         );
     }
 
