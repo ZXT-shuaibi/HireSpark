@@ -29,8 +29,10 @@ import com.nageoffer.ai.ragent.career.service.guard.CareerAiGuardProperties;
 import com.nageoffer.ai.ragent.career.service.guard.CareerAiGuardService;
 import com.nageoffer.ai.ragent.career.service.guard.CareerAiGuardTimeoutException;
 import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightService;
-import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightServiceImpl;
 import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightLlmServiceImpl;
+import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightProperties;
+import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightRedisCoordinator;
+import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightServiceImpl;
 import com.nageoffer.ai.ragent.framework.convention.ChatMessage;
 import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
 import com.nageoffer.ai.ragent.framework.exception.ServiceException;
@@ -42,6 +44,9 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.data.redis.RedisConnectionFailureException;
+import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.RedisScript;
 
 import java.time.Duration;
 import java.nio.charset.StandardCharsets;
@@ -51,6 +56,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -59,8 +65,10 @@ import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -77,6 +85,9 @@ class CareerSingleFlightTest {
 
     @Mock
     private LLMService llmService;
+
+    @Mock
+    private StringRedisTemplate stringRedisTemplate;
 
     private final List<CareerSingleFlightRecordDO> records = new ArrayList<>();
 
@@ -169,6 +180,114 @@ class CareerSingleFlightTest {
     }
 
     @Test
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    void redisCoordinatorMapsLuaStateWithoutRealRedis() {
+        CareerSingleFlightRedisCoordinator coordinator =
+                new CareerSingleFlightRedisCoordinator(stringRedisTemplate, newTestSingleFlightProperties());
+        when(stringRedisTemplate.execute(any(RedisScript.class), anyList(), any(Object[].class)))
+                .thenReturn(List.of("OWNER", "RUNNING", "owner-a", "1", "1", "", "", "trace-1", "1000"))
+                .thenReturn(List.of("0"))
+                .thenReturn(List.of("REPLAY", "SUCCESS", "owner-b", "2", "3", "{\"fresh\":true}", "", "trace-2", "2000"));
+
+        Optional<CareerSingleFlightRedisCoordinator.RedisState> owner =
+                coordinator.acquire("OPTIMIZATION", "key-redis", "owner-a", "trace-1");
+        Optional<Boolean> staleComplete =
+                coordinator.completeSuccess("key-redis", "owner-a", 1L, "{\"stale\":true}");
+        Optional<CareerSingleFlightRedisCoordinator.RedisState> replay =
+                coordinator.replayIfAvailable("key-redis");
+
+        assertTrue(owner.orElseThrow().owner());
+        assertFalse(staleComplete.orElseThrow());
+        assertTrue(replay.orElseThrow().replayAvailable());
+        assertEquals(2L, replay.orElseThrow().fencingToken());
+        assertEquals("{\"fresh\":true}", replay.orElseThrow().resultJson());
+    }
+
+    @Test
+    void redisSingleFlightRejectsStaleFencingTokenBeforeDbAuditUpdate() {
+        stubPersistence();
+        CareerSingleFlightRedisCoordinator coordinator = mock(CareerSingleFlightRedisCoordinator.class);
+        CareerSingleFlightProperties properties = newTestSingleFlightProperties();
+        when(coordinator.acquire("OPTIMIZATION", "key-redis-fence", "owner-a", "trace-1"))
+                .thenReturn(Optional.of(redisState(true, false, "OPTIMIZATION", "key-redis-fence",
+                        "owner-a", 1L, "RUNNING", null, null, 1)));
+        when(coordinator.completeFailure("key-redis-fence", "owner-a", 1L, "TIMEOUT"))
+                .thenReturn(Optional.of(true));
+        when(coordinator.acquire("OPTIMIZATION", "key-redis-fence", "owner-b", "trace-2"))
+                .thenReturn(Optional.of(redisState(true, false, "OPTIMIZATION", "key-redis-fence",
+                        "owner-b", 2L, "RUNNING", null, null, 2)));
+        when(coordinator.completeSuccess("key-redis-fence", "owner-a", 1L, "{\"stale\":true}"))
+                .thenReturn(Optional.of(false));
+        when(coordinator.completeSuccess("key-redis-fence", "owner-b", 2L, "{\"fresh\":true}"))
+                .thenReturn(Optional.of(true));
+        when(coordinator.replayIfAvailable("key-redis-fence"))
+                .thenReturn(Optional.of(redisState(false, true, "OPTIMIZATION", "key-redis-fence",
+                        "owner-b", 2L, "SUCCESS", "{\"fresh\":true}", null, 2)));
+        CareerSingleFlightService service = new CareerSingleFlightServiceImpl(recordMapper, coordinator, properties);
+
+        CareerSingleFlightService.AcquireResult first =
+                service.tryAcquire("OPTIMIZATION", "key-redis-fence", "owner-a", "trace-1");
+        assertTrue(service.completeFailure("key-redis-fence", "owner-a", first.record().getFencingToken(), "TIMEOUT"));
+        CareerSingleFlightService.AcquireResult takeover =
+                service.tryAcquire("OPTIMIZATION", "key-redis-fence", "owner-b", "trace-2");
+
+        assertEquals(2L, takeover.record().getFencingToken());
+        assertFalse(service.completeSuccess("key-redis-fence", "owner-a", 1L, "{\"stale\":true}"));
+        assertTrue(service.completeSuccess("key-redis-fence", "owner-b", 2L, "{\"fresh\":true}"));
+        assertEquals("{\"fresh\":true}",
+                service.replayIfAvailable("key-redis-fence").orElseThrow().getResultJson());
+    }
+
+    @Test
+    void redisFailureFallsBackToDbSingleFlight() {
+        stubPersistence();
+        CareerSingleFlightRedisCoordinator coordinator = mock(CareerSingleFlightRedisCoordinator.class);
+        when(coordinator.acquire("INTERVIEW_EVALUATE", "key-redis-down", "owner-a", "trace-1"))
+                .thenThrow(new RedisConnectionFailureException("redis down"));
+        CareerSingleFlightService service =
+                new CareerSingleFlightServiceImpl(recordMapper, coordinator, newTestSingleFlightProperties());
+
+        CareerSingleFlightService.AcquireResult result =
+                service.tryAcquire("INTERVIEW_EVALUATE", "key-redis-down", "owner-a", "trace-1");
+
+        assertTrue(result.owner());
+        assertEquals(1, records.size());
+        assertEquals("RUNNING", records.get(0).getStatus());
+    }
+
+    @Test
+    void redisReplayMissDoesNotUseDbReplayWhenRedisIsAuthoritative() {
+        CareerSingleFlightRedisCoordinator coordinator = mock(CareerSingleFlightRedisCoordinator.class);
+        when(coordinator.replayIfAvailable("key-redis-authoritative")).thenReturn(Optional.empty());
+        CareerSingleFlightService service =
+                new CareerSingleFlightServiceImpl(recordMapper, coordinator, newTestSingleFlightProperties());
+
+        assertTrue(service.replayIfAvailable("key-redis-authoritative").isEmpty());
+        verify(recordMapper, never()).selectList(anyRecordWrapper());
+    }
+
+    @Test
+    void redisOwnerResultSurvivesDbAuditFailure() {
+        CareerSingleFlightRedisCoordinator coordinator = mock(CareerSingleFlightRedisCoordinator.class);
+        when(coordinator.acquire("OPTIMIZATION", "key-audit-down", "owner-a", "trace-1"))
+                .thenReturn(Optional.of(redisState(true, false, "OPTIMIZATION", "key-audit-down",
+                        "owner-a", 7L, "RUNNING", null, null, 4)));
+        when(recordMapper.selectList(anyRecordWrapper())).thenReturn(List.of());
+        when(recordMapper.insert(any(CareerSingleFlightRecordDO.class)))
+                .thenThrow(new RuntimeException("audit db down"));
+        CareerSingleFlightService service =
+                new CareerSingleFlightServiceImpl(recordMapper, coordinator, newTestSingleFlightProperties());
+
+        CareerSingleFlightService.AcquireResult result =
+                service.tryAcquire("OPTIMIZATION", "key-audit-down", "owner-a", "trace-1");
+
+        assertTrue(result.owner());
+        assertFalse(result.replayAvailable());
+        assertEquals(7L, result.record().getFencingToken());
+        assertEquals("RUNNING", result.record().getStatus());
+    }
+
+    @Test
     void llmWrapperPersistsAndReplaysAiResultWithoutSecondModelCall() {
         stubPersistence();
         stubAttemptPersistence();
@@ -191,6 +310,74 @@ class CareerSingleFlightTest {
         assertFalse(attempts.get(0).getReplayed());
         assertEquals("REPLAYED", attempts.get(1).getStatus());
         assertTrue(attempts.get(1).getReplayed());
+    }
+
+    @Test
+    void llmWrapperFollowerWaitsAndReplaysOwnerResult() {
+        stubAttemptPersistence();
+        CareerSingleFlightProperties properties = newTestSingleFlightProperties();
+        properties.setWaitTimeout(Duration.ofMillis(120));
+        properties.setPollInterval(Duration.ofMillis(10));
+        AtomicInteger replayChecks = new AtomicInteger();
+        CareerSingleFlightService service = new CareerSingleFlightService() {
+            @Override
+            public AcquireResult tryAcquire(String scene, String singleFlightKey, String ownerId, String traceId) {
+                return new AcquireResult(false, false, CareerSingleFlightRecordDO.builder()
+                        .singleFlightKey(singleFlightKey)
+                        .scene(scene)
+                        .ownerId("owner-running")
+                        .fencingToken(1L)
+                        .status("RUNNING")
+                        .requestCount(2)
+                        .heartbeatTime(new Date())
+                        .build());
+            }
+
+            @Override
+            public boolean heartbeat(String singleFlightKey, String ownerId, long fencingToken) {
+                return false;
+            }
+
+            @Override
+            public boolean completeSuccess(String singleFlightKey, String ownerId, long fencingToken, String resultJson) {
+                return false;
+            }
+
+            @Override
+            public boolean completeFailure(String singleFlightKey, String ownerId, long fencingToken, String errorType) {
+                return false;
+            }
+
+            @Override
+            public Optional<CareerSingleFlightRecordDO> replayIfAvailable(String singleFlightKey) {
+                if (replayChecks.incrementAndGet() < 3) {
+                    return Optional.empty();
+                }
+                return Optional.of(CareerSingleFlightRecordDO.builder()
+                        .singleFlightKey(singleFlightKey)
+                        .scene("INTERVIEW_EVALUATE")
+                        .ownerId("owner-running")
+                        .fencingToken(1L)
+                        .status("SUCCESS")
+                        .resultJson("{\"response\":\"owner-result\"}")
+                        .build());
+            }
+        };
+        CareerSingleFlightLlmServiceImpl wrapper = new CareerSingleFlightLlmServiceImpl(
+                service,
+                llmService,
+                new CareerTaskAttemptRecorder(attemptMapper),
+                newGuardService(),
+                properties);
+
+        String result = wrapper.chat("INTERVIEW_EVALUATE", "manual", "trace-follower",
+                ChatRequest.builder().messages(List.of(ChatMessage.user("prompt"))).build());
+
+        assertEquals("owner-result", result);
+        verify(llmService, never()).chat(any(ChatRequest.class));
+        assertEquals(1, attempts.size());
+        assertEquals("REPLAYED", attempts.get(0).getStatus());
+        assertTrue(attempts.get(0).getReplayed());
     }
 
     /**
@@ -382,6 +569,46 @@ class CareerSingleFlightTest {
         properties.getDefaultPolicy().setRetryWaitDuration(Duration.ZERO);
         properties.getStages().values().forEach(policy -> policy.setRetryWaitDuration(Duration.ZERO));
         return properties;
+    }
+
+    /**
+     * 创建测试用 single-flight 配置，缩短 follower 等待窗口。
+     */
+    private CareerSingleFlightProperties newTestSingleFlightProperties() {
+        CareerSingleFlightProperties properties = new CareerSingleFlightProperties();
+        properties.setEnabled(true);
+        properties.setOwnerTimeout(Duration.ofMillis(120_000));
+        properties.setWaitTimeout(Duration.ofMillis(80));
+        properties.setPollInterval(Duration.ofMillis(5));
+        properties.setRedisTtl(Duration.ofMinutes(5));
+        return properties;
+    }
+
+    /**
+     * 构造 Redis 协调器返回的状态快照。
+     */
+    private CareerSingleFlightRedisCoordinator.RedisState redisState(boolean owner,
+                                                                    boolean replayAvailable,
+                                                                    String scene,
+                                                                    String key,
+                                                                    String ownerId,
+                                                                    long fencingToken,
+                                                                    String status,
+                                                                    String resultJson,
+                                                                    String errorType,
+                                                                    int requestCount) {
+        return new CareerSingleFlightRedisCoordinator.RedisState(owner,
+                replayAvailable,
+                scene,
+                key,
+                ownerId,
+                fencingToken,
+                status,
+                System.currentTimeMillis(),
+                requestCount,
+                resultJson,
+                errorType,
+                null);
     }
 
     /**

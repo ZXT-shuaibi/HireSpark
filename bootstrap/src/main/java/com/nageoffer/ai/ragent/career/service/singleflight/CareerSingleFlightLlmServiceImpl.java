@@ -27,8 +27,8 @@ import com.nageoffer.ai.ragent.career.service.guard.CareerAiGuardService;
 import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
 import com.nageoffer.ai.ragent.framework.exception.ServiceException;
 import com.nageoffer.ai.ragent.infra.chat.LLMService;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.nio.charset.StandardCharsets;
@@ -42,7 +42,6 @@ import java.util.UUID;
 
 @Service
 @Slf4j
-@RequiredArgsConstructor
 public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmService {
 
     private static final int KEY_MAX_LENGTH = 200;
@@ -52,7 +51,34 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
     private final LLMService llmService;
     private final CareerTaskAttemptRecorder attemptRecorder;
     private final CareerAiGuardService aiGuardService;
+    private final CareerSingleFlightProperties singleFlightProperties;
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    /**
+     * 创建默认 single-flight LLM 包装器，沿用默认等待参数。
+     */
+    public CareerSingleFlightLlmServiceImpl(CareerSingleFlightService singleFlightService,
+                                            LLMService llmService,
+                                            CareerTaskAttemptRecorder attemptRecorder,
+                                            CareerAiGuardService aiGuardService) {
+        this(singleFlightService, llmService, attemptRecorder, aiGuardService, new CareerSingleFlightProperties());
+    }
+
+    /**
+     * 创建可自定义等待参数的 single-flight LLM 包装器。
+     */
+    @Autowired
+    public CareerSingleFlightLlmServiceImpl(CareerSingleFlightService singleFlightService,
+                                            LLMService llmService,
+                                            CareerTaskAttemptRecorder attemptRecorder,
+                                            CareerAiGuardService aiGuardService,
+                                            CareerSingleFlightProperties singleFlightProperties) {
+        this.singleFlightService = singleFlightService;
+        this.llmService = llmService;
+        this.attemptRecorder = attemptRecorder;
+        this.aiGuardService = aiGuardService;
+        this.singleFlightProperties = singleFlightProperties == null ? new CareerSingleFlightProperties() : singleFlightProperties;
+    }
 
     /**
      * 执行带 single-flight 和 AI Guard 的 Career LLM 调用。
@@ -75,13 +101,13 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
             return unwrapResult(record.getResultJson());
         }
         if (!acquireResult.owner()) {
-            Optional<CareerSingleFlightRecordDO> available = singleFlightService.replayIfAvailable(key);
+            Optional<CareerSingleFlightRecordDO> available = waitForReplay(key);
             if (available.isPresent()) {
                 attemptRecorder.replayed(scene, singleFlightKey, key, traceId, request);
                 return unwrapResult(available.get().getResultJson());
             }
             CareerTaskAttemptDO attempt = attemptRecorder.start(scene, singleFlightKey, key, traceId, request);
-            ServiceException ex = new ServiceException("AI request is already running for the same input");
+            ServiceException ex = new ServiceException("AI request is already running for the same input and no replay became available within wait timeout");
             attemptRecorder.failed(attempt, ex, 0L);
             throw ex;
         }
@@ -100,6 +126,21 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
             attemptRecorder.failed(attempt, ex, System.currentTimeMillis() - startTime);
             throw ex;
         }
+    }
+
+    /**
+     * 在 follower 等待窗口内轮询 single-flight 回放结果。
+     */
+    private Optional<CareerSingleFlightRecordDO> waitForReplay(String key) {
+        long waitTimeoutMillis = singleFlightProperties.waitTimeoutMillis();
+        long pollIntervalMillis = singleFlightProperties.pollIntervalMillis();
+        long deadline = System.currentTimeMillis() + waitTimeoutMillis;
+        Optional<CareerSingleFlightRecordDO> replay = singleFlightService.replayIfAvailable(key);
+        while (replay.isEmpty() && System.currentTimeMillis() < deadline) {
+            sleepQuietly(pollIntervalMillis);
+            replay = singleFlightService.replayIfAvailable(key);
+        }
+        return replay;
     }
 
     /**
@@ -196,5 +237,17 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
     private String errorType(RuntimeException ex) {
         String name = ex.getClass().getSimpleName();
         return StrUtil.blankToDefault(name, "AI_CALL_FAILED");
+    }
+
+    /**
+     * 安静地等待 follower 轮询间隔。
+     */
+    private void sleepQuietly(long millis) {
+        try {
+            Thread.sleep(Math.max(1L, millis));
+        } catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new ServiceException("Interrupted while waiting for single-flight replay");
+        }
     }
 }
