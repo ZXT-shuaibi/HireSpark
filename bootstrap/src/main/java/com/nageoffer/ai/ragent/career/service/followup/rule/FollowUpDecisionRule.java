@@ -15,21 +15,20 @@
  * limitations under the License.
  */
 
-package com.nageoffer.ai.ragent.career.service.followup;
+package com.nageoffer.ai.ragent.career.service.followup.rule;
 
-import com.nageoffer.ai.ragent.career.dao.entity.InterviewTurnDO;
+import com.nageoffer.ai.ragent.career.service.followup.InterviewFollowUpDecision;
+import com.nageoffer.ai.ragent.career.service.followup.InterviewFollowUpDecisionRequest;
 
-import java.util.List;
-import java.util.Map;
+import java.util.Optional;
 
 /**
- * 追问决策请求，聚合当前轮次、会话状态、会话轮次、评分反馈和 LLM 追问建议。
+ * 追问决策规则节点接口，单个节点只负责判断一种追问条件。
  */
-public record InterviewFollowUpDecisionRequest(InterviewTurnDO currentTurn,
-                                               List<InterviewTurnDO> sessionTurns,
-                                               Integer score,
-                                               Map<String, Object> feedback,
-                                               boolean llmFollowUpRequired,
-                                               String llmFollowUpQuestion,
-                                               String sessionStatus) {
+public interface FollowUpDecisionRule {
+
+    /**
+     * 尝试根据当前请求产出追问决策，未命中时返回空交给后续节点。
+     */
+    Optional<InterviewFollowUpDecision> apply(InterviewFollowUpDecisionRequest request);
 }

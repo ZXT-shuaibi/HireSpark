@@ -105,6 +105,11 @@ career:
   ai:
     model-id:
     prompt-version: v1
+  interview:
+    follow-up:
+      max-follow-up-count: 2
+      low-score-threshold: 60
+      low-score-fallback-question: 能否再补充一个关键细节，说明你的思路或取舍？
   features:
     resume-export: true
     text-interview: true

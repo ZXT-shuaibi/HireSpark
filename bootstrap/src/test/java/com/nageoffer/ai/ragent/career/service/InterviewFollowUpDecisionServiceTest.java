@@ -18,9 +18,16 @@
 package com.nageoffer.ai.ragent.career.service;
 
 import com.nageoffer.ai.ragent.career.dao.entity.InterviewTurnDO;
+import com.nageoffer.ai.ragent.career.enums.InterviewSessionStatus;
+import com.nageoffer.ai.ragent.career.service.followup.CareerInterviewFollowUpProperties;
 import com.nageoffer.ai.ragent.career.service.followup.DefaultInterviewFollowUpDecisionService;
 import com.nageoffer.ai.ragent.career.service.followup.InterviewFollowUpDecision;
 import com.nageoffer.ai.ragent.career.service.followup.InterviewFollowUpDecisionRequest;
+import com.nageoffer.ai.ragent.career.service.followup.rule.AiSuggestionRule;
+import com.nageoffer.ai.ragent.career.service.followup.rule.CompletedStateGuardRule;
+import com.nageoffer.ai.ragent.career.service.followup.rule.FollowUpLimitRule;
+import com.nageoffer.ai.ragent.career.service.followup.rule.LowScoreRule;
+import com.nageoffer.ai.ragent.career.service.followup.rule.MissingPointsRule;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -35,7 +42,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
  */
 class InterviewFollowUpDecisionServiceTest {
 
-    private final DefaultInterviewFollowUpDecisionService service = new DefaultInterviewFollowUpDecisionService();
+    private final DefaultInterviewFollowUpDecisionService service = serviceWith(new CareerInterviewFollowUpProperties());
 
     /**
      * 验证同一会话追问达到默认上限后不再继续创建追问。
@@ -78,6 +85,20 @@ class InterviewFollowUpDecisionServiceTest {
     }
 
     /**
+     * 验证已完成会话即使收到 LLM 追问建议也不会继续生成追问。
+     */
+    @Test
+    void completedSessionStopsFollowUpEvenWhenLlmSuggestsQuestion() {
+        InterviewFollowUpDecision decision = service.decide(request(85, true, "Please explain more.",
+                Map.of("weaknesses", List.of()),
+                List.of(turn("PROJECT_DEEP_DIVE")),
+                InterviewSessionStatus.COMPLETED.name()));
+
+        assertFalse(decision.required());
+        assertEquals("COMPLETED_STATE_GUARD", decision.matchedRule());
+    }
+
+    /**
      * 验证低分且无 LLM 追问问题时生成保守兜底追问。
      */
     @Test
@@ -89,6 +110,25 @@ class InterviewFollowUpDecisionServiceTest {
         assertTrue(decision.required());
         assertEquals("LOW_SCORE", decision.matchedRule());
         assertEquals("能否再补充一个关键细节，说明你的思路或取舍？", decision.question());
+    }
+
+    /**
+     * 验证低分阈值使用配置值，配置调高后原本不触发的分数也会触发兜底追问。
+     */
+    @Test
+    void configuredLowScoreThresholdControlsFallbackDecision() {
+        CareerInterviewFollowUpProperties properties = new CareerInterviewFollowUpProperties();
+        properties.setLowScoreThreshold(70);
+        properties.setLowScoreFallbackQuestion("请补充关键决策依据。");
+        DefaultInterviewFollowUpDecisionService configuredService = serviceWith(properties);
+
+        InterviewFollowUpDecision decision = configuredService.decide(request(65, false, null,
+                Map.of("weaknesses", List.of()),
+                List.of(turn("TECHNICAL"))));
+
+        assertTrue(decision.required());
+        assertEquals("LOW_SCORE", decision.matchedRule());
+        assertEquals("请补充关键决策依据。", decision.question());
     }
 
     /**
@@ -131,12 +171,42 @@ class InterviewFollowUpDecisionServiceTest {
                 score,
                 feedback,
                 llmFollowUpRequired,
-                llmFollowUpQuestion
+                llmFollowUpQuestion,
+                InterviewSessionStatus.RUNNING.name()
+        );
+    }
+
+    // 构造指定会话状态的追问决策请求，验证终态守卫节点。
+    private InterviewFollowUpDecisionRequest request(Integer score,
+                                                     boolean llmFollowUpRequired,
+                                                     String llmFollowUpQuestion,
+                                                     Map<String, Object> feedback,
+                                                     List<InterviewTurnDO> turns,
+                                                     String sessionStatus) {
+        return new InterviewFollowUpDecisionRequest(
+                turn("TECHNICAL"),
+                turns,
+                score,
+                feedback,
+                llmFollowUpRequired,
+                llmFollowUpQuestion,
+                sessionStatus
         );
     }
 
     // 构造指定类型的面试轮次，供规则统计追问次数。
     private InterviewTurnDO turn(String turnType) {
         return InterviewTurnDO.builder().turnType(turnType).build();
+    }
+
+    // 构造包含固定规则顺序的追问决策服务，避免测试依赖 Spring 容器。
+    private DefaultInterviewFollowUpDecisionService serviceWith(CareerInterviewFollowUpProperties properties) {
+        return new DefaultInterviewFollowUpDecisionService(List.of(
+                new FollowUpLimitRule(properties),
+                new CompletedStateGuardRule(),
+                new AiSuggestionRule(),
+                new MissingPointsRule(),
+                new LowScoreRule(properties)
+        ));
     }
 }

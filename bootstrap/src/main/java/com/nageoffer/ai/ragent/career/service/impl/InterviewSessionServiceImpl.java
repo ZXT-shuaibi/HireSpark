@@ -428,7 +428,8 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
                         evaluation.score(),
                         evaluation.feedback(),
                         evaluation.followUpRequired(),
-                        evaluation.followUpQuestion()));
+                        evaluation.followUpQuestion(),
+                        session.getStatus()));
         if (followUpDecision.required()) {
             InterviewTurnDO followUp = createFollowUpTurn(session, currentTurn, followUpDecision.question(), userId);
             session.setCurrentTurnNo(followUp.getTurnNo());
