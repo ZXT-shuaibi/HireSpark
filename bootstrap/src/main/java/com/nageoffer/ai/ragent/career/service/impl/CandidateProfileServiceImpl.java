@@ -59,6 +59,7 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -243,7 +244,7 @@ public class CandidateProfileServiceImpl implements CandidateProfileService {
                 .exportType(exportType)
                 .status(EXPORT_STATUS_RUNNING)
                 .templateVersion(validation.templateVersion())
-                .validationResultJson(writeJson(validation.toPayload()))
+                .validationResultJson(writeJson(validationPayload(validation, validation.contentType())))
                 .traceId(validation.traceId())
                 .build();
         resumeExportRecordMapper.insert(record);
@@ -262,6 +263,7 @@ public class CandidateProfileServiceImpl implements CandidateProfileService {
             record.setFileUrl(stored.getUrl());
             record.setStatus(EXPORT_STATUS_SUCCESS);
             record.setErrorMessage(null);
+            record.setValidationResultJson(writeJson(validationPayload(validation, payload.contentType())));
             try {
                 resumeExportRecordMapper.updateById(record);
             } catch (RuntimeException ex) {
@@ -462,6 +464,14 @@ public class CandidateProfileServiceImpl implements CandidateProfileService {
         } catch (Exception ex) {
             throw new ServiceException("Failed to serialize resume JSON");
         }
+    }
+
+    private Map<String, Object> validationPayload(ResumeRenderValidationResult validation, String contentType) {
+        Map<String, Object> payload = new LinkedHashMap<>(validation.toPayload());
+        payload.put("contentType", StrUtil.blankToDefault(contentType, validation.contentType()));
+        payload.put("templateVersion", validation.templateVersion());
+        payload.put("traceId", validation.traceId());
+        return payload;
     }
 
     private String normalizeContentJson(String contentJson) {

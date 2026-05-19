@@ -93,6 +93,64 @@ class ResumeRenderPipelineTest {
     }
 
     /**
+     * 校验结构化 JSON 会先映射到模板字段，再渲染成 Markdown，而不是直接输出原始 JSON。
+     */
+    @Test
+    void markdownRenderUsesTemplateFieldsFromContentJson() {
+        ResumeVersionDO version = ResumeVersionDO.builder()
+                .id("version-json")
+                .title("张三简历")
+                .contentJson("""
+                        {
+                          "basic": {
+                            "name": "张三",
+                            "headline": "后端开发工程师",
+                            "phone": "13800000000",
+                            "email": "zhangsan@example.com"
+                          },
+                          "summary": "负责高并发业务平台和智能简历交付。",
+                          "skills": ["Java", "Spring Boot", "Redis"],
+                          "projects": [
+                            {
+                              "name": "Ragent Career",
+                              "role": "核心开发",
+                              "description": "建设简历模板渲染和导出失效闭环。",
+                              "techStack": ["Java 17", "PostgreSQL"]
+                            }
+                          ],
+                          "experiences": [
+                            {
+                              "company": "示例科技",
+                              "position": "后端工程师",
+                              "startDate": "2022.01",
+                              "endDate": "至今",
+                              "responsibilities": ["负责导出链路", "维护任务追踪"]
+                            }
+                          ],
+                          "education": [
+                            {
+                              "school": "示例大学",
+                              "degree": "本科",
+                              "major": "计算机科学",
+                              "startDate": "2018",
+                              "endDate": "2022"
+                            }
+                          ]
+                        }
+                        """)
+                .build();
+
+        ResumeRenderOutput output = pipeline.render(version, "MARKDOWN");
+
+        String markdown = new String(output.content(), StandardCharsets.UTF_8);
+        org.assertj.core.api.Assertions.assertThat(markdown)
+                .contains("# 张三", "后端开发工程师", "## 技能", "- Java", "Ragent Career", "示例大学")
+                .doesNotContain("{\"basic\"");
+        assertEquals("resume-version-json.md", output.fileName());
+        assertEquals("text/markdown", output.contentType());
+    }
+
+    /**
      * 校验 PDF 渲染会生成合法 PDF 头部。
      */
     @Test

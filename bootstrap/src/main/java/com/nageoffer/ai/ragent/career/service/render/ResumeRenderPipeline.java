@@ -30,6 +30,7 @@ import org.commonmark.parser.Parser;
 import org.commonmark.renderer.html.HtmlRenderer;
 import org.docx4j.convert.in.xhtml.XHTMLImporterImpl;
 import org.docx4j.openpackaging.packages.WordprocessingMLPackage;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
@@ -55,6 +56,22 @@ public class ResumeRenderPipeline {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Parser markdownParser = Parser.builder().build();
     private final HtmlRenderer htmlRenderer = HtmlRenderer.builder().build();
+    private final ResumeTemplateRenderer templateRenderer;
+
+    /**
+     * 兼容不启动 Spring 容器的单元测试，使用默认模板渲染器。
+     */
+    public ResumeRenderPipeline() {
+        this(new ResumeTemplateRenderer());
+    }
+
+    /**
+     * 注入简历模板渲染器，统一生成导出前的 Markdown。
+     */
+    @Autowired
+    public ResumeRenderPipeline(ResumeTemplateRenderer templateRenderer) {
+        this.templateRenderer = templateRenderer;
+    }
 
     /**
      * 校验简历版本是否具备指定格式的渲染前置条件。
@@ -75,6 +92,7 @@ public class ResumeRenderPipeline {
                 .valid(supported && missingFields.isEmpty())
                 .missingFields(missingFields)
                 .templateVersion(TEMPLATE_VERSION)
+                .contentType(contentType(type))
                 .warnings(warnings)
                 .traceId(traceId)
                 .rendererEnabled(supported)
@@ -91,7 +109,7 @@ public class ResumeRenderPipeline {
             throw new ClientException(StrUtil.blankToDefault(validation.disabledReason(), "简历渲染校验失败"));
         }
         String type = StrUtil.blankToDefault(exportType, "").trim().toUpperCase(Locale.ROOT);
-        String markdown = resolveMarkdown(version);
+        String markdown = templateRenderer.render(version);
         return switch (type) {
             case EXPORT_TYPE_MARKDOWN -> new ResumeRenderOutput(fileName(version, "md"), CONTENT_TYPE_MARKDOWN,
                     markdown.getBytes(StandardCharsets.UTF_8));
@@ -104,6 +122,19 @@ public class ResumeRenderPipeline {
             case EXPORT_TYPE_WORD -> new ResumeRenderOutput(fileName(version, "docx"), CONTENT_TYPE_DOCX,
                     renderDocx(buildHtmlDocument(version, markdown)));
             default -> throw new ClientException("不支持的简历导出格式: " + type);
+        };
+    }
+
+    /**
+     * 根据导出类型返回实际内容类型，写入校验结果便于追溯。
+     */
+    private String contentType(String type) {
+        return switch (type) {
+            case EXPORT_TYPE_MARKDOWN -> CONTENT_TYPE_MARKDOWN;
+            case EXPORT_TYPE_HTML -> CONTENT_TYPE_HTML;
+            case EXPORT_TYPE_PDF -> CONTENT_TYPE_PDF;
+            case EXPORT_TYPE_WORD -> CONTENT_TYPE_DOCX;
+            default -> "";
         };
     }
 
@@ -166,17 +197,6 @@ public class ResumeRenderPipeline {
     }
 
     /**
-     * 解析简历版本中的 Markdown 源文本。
-     */
-    private String resolveMarkdown(ResumeVersionDO version) {
-        String markdown = firstNotBlank(version.getMarkdownContent(), version.getContentJson());
-        if (StrUtil.isBlank(markdown)) {
-            throw new ClientException("简历导出内容为空");
-        }
-        return markdown;
-    }
-
-    /**
      * 生成导出文件名，保持和历史文件命名一致。
      */
     private String fileName(ResumeVersionDO version, String extension) {
@@ -202,20 +222,15 @@ public class ResumeRenderPipeline {
         try {
             JsonNode root = objectMapper.readTree(version.getContentJson());
             JsonNode basic = root.path("basic");
-            if (basic.isMissingNode() || StrUtil.isBlank(basic.path("name").asText(null))) {
+            if ((basic.isMissingNode() || StrUtil.isBlank(basic.path("name").asText(null)))
+                    && StrUtil.isBlank(version.getTitle())
+                    && StrUtil.isBlank(version.getMarkdownContent())) {
                 missing.add("basic.name");
             }
         } catch (Exception ex) {
             missing.add("contentJson");
         }
         return missing;
-    }
-
-    /**
-     * 返回首个非空文本，用于选择 Markdown 正文或兜底内容。
-     */
-    private String firstNotBlank(String preferred, String fallback) {
-        return StrUtil.isNotBlank(preferred) ? preferred : fallback;
     }
 
     /**

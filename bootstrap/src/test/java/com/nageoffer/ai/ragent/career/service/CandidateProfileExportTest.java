@@ -106,7 +106,7 @@ class CandidateProfileExportTest {
     }
 
     /**
-     * 校验 Markdown 导出会上传原始 Markdown 内容并记录成功状态。
+     * 校验 Markdown 导出会上传模板化内容并记录成功状态。
      */
     @Test
     void exportMarkdownUploadsMarkdownContentAndRecordsSuccess() {
@@ -133,12 +133,21 @@ class CandidateProfileExportTest {
         assertEquals("s3://career-resume-export/resume.md", result.getFileUrl());
         assertEquals("SUCCESS", result.getStatus());
         assertEquals(ResumeRenderPipeline.TEMPLATE_VERSION, result.getTemplateVersion());
+        assertEquals("career-render-version-1-markdown", result.getTraceId());
         org.assertj.core.api.Assertions.assertThat(result.getValidationResultJson())
-                .contains("\"valid\":true", "\"templateVersion\":\"career-resume-template-v1\"");
+                .contains(
+                        "\"valid\":true",
+                        "\"templateVersion\":\"career-resume-template-v1\"",
+                        "\"traceId\":\"career-render-version-1-markdown\"",
+                        "\"contentType\":\"text/markdown\"");
 
         ArgumentCaptor<byte[]> contentCaptor = ArgumentCaptor.forClass(byte[].class);
         verify(fileStorageService).upload(eq("career-resume-export"), contentCaptor.capture(), eq("resume-version-1.md"), eq("text/markdown"));
-        assertEquals("# Alice", new String(contentCaptor.getValue(), StandardCharsets.UTF_8));
+        String markdown = new String(contentCaptor.getValue(), StandardCharsets.UTF_8);
+        org.assertj.core.api.Assertions.assertThat(markdown)
+                .contains("# Alice", "Java Developer", "## 技能", "- Java", "Career Export")
+                .doesNotContain("{\"basic\"")
+                .isNotEqualTo("# Alice");
     }
 
     /**
@@ -162,7 +171,7 @@ class CandidateProfileExportTest {
         verify(fileStorageService).upload(eq("career-resume-export"), contentCaptor.capture(), eq("resume-version-1.html"), eq("text/html"));
         String html = new String(contentCaptor.getValue(), StandardCharsets.UTF_8);
         org.assertj.core.api.Assertions.assertThat(html)
-                .contains("<!DOCTYPE html>", "<h1>Alice</h1>");
+                .contains("<!DOCTYPE html>", "<h1>Alice</h1>", "Java Developer");
     }
 
     /**
@@ -444,7 +453,23 @@ class CandidateProfileExportTest {
                 .profileId("profile-1")
                 .versionNo(1)
                 .title("Alice Resume")
-                .contentJson("{\"basic\":{\"name\":\"Alice\"}}")
+                .contentJson("""
+                        {
+                          "basic": {
+                            "name": "Alice",
+                            "headline": "Java Developer",
+                            "email": "alice@example.com"
+                          },
+                          "summary": "Backend engineer",
+                          "skills": ["Java", "Redis"],
+                          "projects": [
+                            {
+                              "name": "Career Export",
+                              "description": "Template rendering and export invalidation"
+                            }
+                          ]
+                        }
+                        """)
                 .markdownContent("# Alice")
                 .build();
     }
