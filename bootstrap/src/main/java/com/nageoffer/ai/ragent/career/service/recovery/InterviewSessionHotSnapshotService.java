@@ -48,17 +48,23 @@ public interface InterviewSessionHotSnapshotService {
 
         private Integer version;
 
+        private Integer materialVersion;
+
         private String status;
 
         private Integer currentTurnNo;
 
         private String lastAppliedStepKey;
 
+        private String lastMutationId;
+
         private Integer lastTurnSeq;
 
         private Integer archiveWatermark;
 
         private Integer scoreCount;
+
+        private String lastCommittedTurnDigest;
 
         private String snapshotJson;
     }

@@ -883,8 +883,14 @@ CREATE TABLE t_career_interview_session_snapshot (
     session_id            VARCHAR(20) NOT NULL,
     user_id               VARCHAR(20) NOT NULL,
     version               INTEGER     NOT NULL DEFAULT 1,
+    material_version      INTEGER     NOT NULL DEFAULT 1,
     snapshot_json         JSONB       NOT NULL,
     last_applied_step_key VARCHAR(128),
+    last_mutation_id      VARCHAR(128),
+    last_turn_seq         INTEGER     NOT NULL DEFAULT 0,
+    archive_watermark     INTEGER     NOT NULL DEFAULT 0,
+    score_count           INTEGER     NOT NULL DEFAULT 0,
+    last_committed_turn_digest VARCHAR(64),
     status                VARCHAR(32),
     created_by            VARCHAR(20),
     updated_by            VARCHAR(20),
@@ -895,11 +901,40 @@ CREATE TABLE t_career_interview_session_snapshot (
 CREATE INDEX idx_career_interview_snapshot_session ON t_career_interview_session_snapshot (session_id, version DESC);
 CREATE INDEX idx_career_interview_snapshot_user ON t_career_interview_session_snapshot (user_id);
 CREATE INDEX idx_career_interview_snapshot_step ON t_career_interview_session_snapshot (last_applied_step_key) WHERE deleted = 0;
+CREATE UNIQUE INDEX uk_career_interview_snapshot_version ON t_career_interview_session_snapshot (session_id, user_id, version) WHERE deleted = 0;
 COMMENT ON TABLE t_career_interview_session_snapshot IS 'Interview session recovery snapshot table';
 COMMENT ON COLUMN t_career_interview_session_snapshot.session_id IS 'Interview session id';
 COMMENT ON COLUMN t_career_interview_session_snapshot.version IS 'Snapshot version';
+COMMENT ON COLUMN t_career_interview_session_snapshot.material_version IS '冷态材料版本';
 COMMENT ON COLUMN t_career_interview_session_snapshot.snapshot_json IS 'Recoverable session runtime JSON';
 COMMENT ON COLUMN t_career_interview_session_snapshot.last_applied_step_key IS 'Last applied turn idempotency key';
+COMMENT ON COLUMN t_career_interview_session_snapshot.last_mutation_id IS '最后一次运行态变更ID';
+COMMENT ON COLUMN t_career_interview_session_snapshot.last_turn_seq IS '最后轮次序号水位';
+COMMENT ON COLUMN t_career_interview_session_snapshot.archive_watermark IS '轮次归档水位';
+COMMENT ON COLUMN t_career_interview_session_snapshot.score_count IS '已评分轮次数量';
+COMMENT ON COLUMN t_career_interview_session_snapshot.last_committed_turn_digest IS '最后提交轮次摘要';
+
+CREATE TABLE t_career_interview_turn_archive (
+    id                   VARCHAR(20) NOT NULL PRIMARY KEY,
+    session_id           VARCHAR(20) NOT NULL,
+    user_id              VARCHAR(20) NOT NULL,
+    request_id           VARCHAR(128),
+    seq                  INTEGER     NOT NULL,
+    snapshot_version     INTEGER     NOT NULL,
+    turn_payload_json    JSONB       NOT NULL,
+    turn_digest          VARCHAR(64),
+    create_time          TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted              SMALLINT    NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX uk_career_turn_archive_seq ON t_career_interview_turn_archive (session_id, user_id, seq, snapshot_version) WHERE deleted = 0;
+CREATE INDEX idx_career_turn_archive_request ON t_career_interview_turn_archive (request_id) WHERE deleted = 0;
+CREATE INDEX idx_career_turn_archive_session ON t_career_interview_turn_archive (session_id, seq);
+COMMENT ON TABLE t_career_interview_turn_archive IS '面试轮次不可变归档表';
+COMMENT ON COLUMN t_career_interview_turn_archive.request_id IS '答题请求或幂等ID';
+COMMENT ON COLUMN t_career_interview_turn_archive.seq IS '轮次归档序号';
+COMMENT ON COLUMN t_career_interview_turn_archive.snapshot_version IS '关联快照版本';
+COMMENT ON COLUMN t_career_interview_turn_archive.turn_payload_json IS '轮次回放载荷';
+COMMENT ON COLUMN t_career_interview_turn_archive.turn_digest IS '轮次摘要';
 
 CREATE TABLE t_career_interview_report (
     id               VARCHAR(20) NOT NULL PRIMARY KEY,

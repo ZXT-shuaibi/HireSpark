@@ -19,6 +19,25 @@ package com.nageoffer.ai.ragent.career.dao.mapper;
 
 import com.baomidou.mybatisplus.core.mapper.BaseMapper;
 import com.nageoffer.ai.ragent.career.dao.entity.InterviewSessionSnapshotDO;
+import org.apache.ibatis.annotations.Insert;
 
 public interface InterviewSessionSnapshotMapper extends BaseMapper<InterviewSessionSnapshotDO> {
+
+    /**
+     * 按快照版本追加写入，版本冲突时直接返回 0，避免 PostgreSQL 事务进入 aborted 状态。
+     */
+    @Insert("""
+            INSERT INTO t_career_interview_session_snapshot (
+                id, session_id, user_id, version, material_version, snapshot_json,
+                last_applied_step_key, last_mutation_id, last_turn_seq, archive_watermark,
+                score_count, last_committed_turn_digest, status, created_by, updated_by
+            ) VALUES (
+                #{id}, #{sessionId}, #{userId}, #{version}, #{materialVersion},
+                #{snapshotJson,typeHandler=com.nageoffer.ai.ragent.knowledge.dao.handler.JsonbTypeHandler},
+                #{lastAppliedStepKey}, #{lastMutationId}, #{lastTurnSeq}, #{archiveWatermark},
+                #{scoreCount}, #{lastCommittedTurnDigest}, #{status}, #{createdBy}, #{updatedBy}
+            )
+            ON CONFLICT (session_id, user_id, version) WHERE deleted = 0 DO NOTHING
+            """)
+    int insertIfVersionAbsent(InterviewSessionSnapshotDO snapshot);
 }

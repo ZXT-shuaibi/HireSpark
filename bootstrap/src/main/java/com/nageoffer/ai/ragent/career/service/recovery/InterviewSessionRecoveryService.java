@@ -25,4 +25,9 @@ public interface InterviewSessionRecoveryService {
     void snapshotStableState(InterviewSessionDO session, String userId, String lastAppliedStepKey);
 
     CareerInterviewSessionVO recover(String sessionId);
+
+    /**
+     * 按指定范围恢复面试运行态，支持只恢复流程、评分、回放或完整热态。
+     */
+    CareerInterviewSessionVO recover(String sessionId, InterviewRecoveryScope scope);
 }

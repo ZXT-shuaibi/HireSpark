@@ -35,8 +35,8 @@ import java.util.Date;
 @NoArgsConstructor
 @AllArgsConstructor
 @Builder
-@TableName(value = "t_career_interview_session_snapshot", autoResultMap = true)
-public class InterviewSessionSnapshotDO {
+@TableName(value = "t_career_interview_turn_archive", autoResultMap = true)
+public class InterviewTurnArchiveDO {
 
     @TableId(type = IdType.ASSIGN_ID)
     private String id;
@@ -45,36 +45,19 @@ public class InterviewSessionSnapshotDO {
 
     private String userId;
 
-    private Integer version;
+    private String requestId;
 
-    private Integer materialVersion;
+    private Integer seq;
+
+    private Integer snapshotVersion;
 
     @TableField(typeHandler = JsonbTypeHandler.class)
-    private String snapshotJson;
+    private String turnPayloadJson;
 
-    private String lastAppliedStepKey;
-
-    private String lastMutationId;
-
-    private Integer lastTurnSeq;
-
-    private Integer archiveWatermark;
-
-    private Integer scoreCount;
-
-    private String lastCommittedTurnDigest;
-
-    private String status;
-
-    private String createdBy;
-
-    private String updatedBy;
+    private String turnDigest;
 
     @TableField(fill = FieldFill.INSERT)
     private Date createTime;
-
-    @TableField(fill = FieldFill.INSERT_UPDATE)
-    private Date updateTime;
 
     @TableLogic
     private Integer deleted;

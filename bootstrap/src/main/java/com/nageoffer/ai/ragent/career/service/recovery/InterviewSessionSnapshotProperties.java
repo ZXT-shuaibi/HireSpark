@@ -39,6 +39,11 @@ public class InterviewSessionSnapshotProperties {
     private Duration hotTtl = Duration.ofHours(6);
 
     /**
+     * Redis 热快照刷新去抖窗口，合并同一会话的短时间重复刷新。
+     */
+    private Duration hotDebounceWindow = Duration.ofMillis(150);
+
+    /**
      * 返回热快照保留时间，避免配置为空或非正数导致 Redis 写入异常。
      */
     public Duration resolvedHotTtl() {
@@ -46,5 +51,15 @@ public class InterviewSessionSnapshotProperties {
             return Duration.ofHours(6);
         }
         return hotTtl;
+    }
+
+    /**
+     * 返回热快照刷新去抖窗口，非法配置按 150 毫秒处理。
+     */
+    public Duration resolvedHotDebounceWindow() {
+        if (hotDebounceWindow == null || hotDebounceWindow.isNegative()) {
+            return Duration.ofMillis(150);
+        }
+        return hotDebounceWindow;
     }
 }
