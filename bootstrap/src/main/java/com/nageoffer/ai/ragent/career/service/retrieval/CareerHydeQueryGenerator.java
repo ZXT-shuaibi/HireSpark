@@ -54,8 +54,8 @@ public class CareerHydeQueryGenerator {
         CareerRetrievalScenario actualScenario = scenario == null ? CareerRetrievalScenario.ALIGNMENT : scenario;
         String prompt = buildPrompt(actualScenario, resumeVersion, job, querySeed);
         String response = singleFlightLlmService.chat(SCENE,
-                buildSingleFlightKey(actualScenario, resumeVersion, job, querySeed),
-                buildTraceId(actualScenario, resumeVersion, job, querySeed),
+                buildSingleFlightKey(actualScenario, resumeVersion, job, prompt),
+                buildTraceId(actualScenario, resumeVersion, job, prompt),
                 ChatRequest.builder()
                         .messages(List.of(ChatMessage.user(prompt)))
                         .temperature(0.2D)
@@ -94,13 +94,13 @@ public class CareerHydeQueryGenerator {
     private String buildSingleFlightKey(CareerRetrievalScenario scenario,
                                         ResumeVersionDO resumeVersion,
                                         JobDescriptionDO job,
-                                        String querySeed) {
+                                        String prompt) {
         return String.join(":",
                 SCENE,
                 scenario.name(),
                 StrUtil.blankToDefault(resumeVersion == null ? null : resumeVersion.getId(), "resume"),
                 StrUtil.blankToDefault(job == null ? null : job.getId(), "job"),
-                sha256(defaultText(querySeed)));
+                sha256(defaultText(prompt)));
     }
 
     /**
@@ -109,13 +109,13 @@ public class CareerHydeQueryGenerator {
     private String buildTraceId(CareerRetrievalScenario scenario,
                                 ResumeVersionDO resumeVersion,
                                 JobDescriptionDO job,
-                                String querySeed) {
+                                String prompt) {
         return String.join("-",
                 "career-hyde",
                 scenario.name().toLowerCase(Locale.ROOT),
                 StrUtil.blankToDefault(resumeVersion == null ? null : resumeVersion.getId(), "resume"),
                 StrUtil.blankToDefault(job == null ? null : job.getId(), "job"),
-                sha256(defaultText(querySeed)).substring(0, 12));
+                sha256(defaultText(prompt)).substring(0, 12));
     }
 
     /**

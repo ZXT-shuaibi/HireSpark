@@ -102,7 +102,11 @@ class CareerRetrievalEnhancementTest {
 
     @Test
     void promptPayloadCarriesEvidenceTypesWithoutMakingHydeAResumeFact() throws Exception {
-        CareerRetrievalEnhancement result = newService(null, null)
+        CareerHydeQueryGenerator hydeQueryGenerator = mock(CareerHydeQueryGenerator.class);
+        when(hydeQueryGenerator.generate(any(), any(), any(), anyString()))
+                .thenReturn("理想候选人画像：具备 Redis 高并发治理经验。");
+
+        CareerRetrievalEnhancement result = newService(null, null, hydeQueryGenerator)
                 .enhanceOptimization(resumeVersion(), jobDescription(), "{\"gaps\":[\"Redis\"]}");
 
         Map<String, Object> payload = roundTrip(result.toPromptPayload());
@@ -119,7 +123,8 @@ class CareerRetrievalEnhancementTest {
 
         assertEquals(Boolean.TRUE, hyde.get("queryOnly"));
         assertEquals(Boolean.FALSE, resume.get("queryOnly"));
-        assertFalse(String.valueOf(resume.get("text")).contains(String.valueOf(hyde.get("text"))));
+        assertEquals("理想候选人画像：具备 Redis 高并发治理经验。", hyde.get("text"));
+        assertFalse(String.valueOf(resume.get("text")).contains("理想候选人画像"));
     }
 
     @Test
@@ -183,6 +188,24 @@ class CareerRetrievalEnhancementTest {
         assertTrue(prompts.get(2).contains("面试"));
         assertNotEquals(prompts.get(0), prompts.get(1));
         assertNotEquals(prompts.get(1), prompts.get(2));
+    }
+
+    @Test
+    void hydeGeneratorSingleFlightKeyChangesWhenResumeContentChanges() {
+        CareerSingleFlightLlmService singleFlightLlmService = mock(CareerSingleFlightLlmService.class);
+        when(singleFlightLlmService.chat(anyString(), anyString(), any(), any(ChatRequest.class)))
+                .thenReturn("候选人画像");
+        CareerHydeQueryGenerator generator = new CareerHydeQueryGenerator(singleFlightLlmService);
+        ResumeVersionDO updatedResume = resumeVersion();
+        updatedResume.setContentJson("{\"skills\":[\"Java\",\"Redis\"],\"projects\":[\"Ragent v2\"]}");
+
+        generator.generate(CareerRetrievalScenario.ALIGNMENT, resumeVersion(), jobDescription(), "alignment seed");
+        generator.generate(CareerRetrievalScenario.ALIGNMENT, updatedResume, jobDescription(), "alignment seed");
+
+        ArgumentCaptor<String> keyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(singleFlightLlmService, times(2)).chat(eq("CAREER_HYDE"), keyCaptor.capture(), anyString(),
+                any(ChatRequest.class));
+        assertNotEquals(keyCaptor.getAllValues().get(0), keyCaptor.getAllValues().get(1));
     }
 
     private CareerRetrievalEnhancementServiceImpl newService(RetrieverService retrieverService,

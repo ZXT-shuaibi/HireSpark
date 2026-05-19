@@ -119,7 +119,7 @@ public class CareerRetrievalEnhancementServiceImpl implements CareerRetrievalEnh
                     QUERY_MAX_LENGTH);
             return StrUtil.isBlank(generatedQuery) ? seedQuery : generatedQuery;
         } catch (RuntimeException ex) {
-            log.warn("Career HyDE query generation failed, degraded to seed: {}", ex.getMessage());
+            log.warn("Career HyDE query generation failed, degraded to seed", ex);
             return seedQuery;
         }
     }
@@ -154,7 +154,7 @@ public class CareerRetrievalEnhancementServiceImpl implements CareerRetrievalEnh
                             .build())
                     .toList();
         } catch (RuntimeException ex) {
-            log.warn("Career retrieval enhancement degraded to local evidence: {}", ex.getMessage());
+            log.warn("Career retrieval enhancement degraded to local evidence", ex);
             return List.of();
         }
     }
