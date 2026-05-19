@@ -47,7 +47,7 @@ public class CareerAiGuardProperties {
     }
 
     /**
-     * 规范化场景名称，避免配置键大小写或空白导致策略失效。
+     * 规范化场景名称，避免配置键大小写或中划线差异导致策略失效。
      */
     public String normalize(String scene) {
         return StrUtil.blankToDefault(scene, "CAREER_AI").trim().replace('-', '_').toUpperCase(Locale.ROOT);

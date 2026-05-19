@@ -25,6 +25,7 @@ import io.github.resilience4j.bulkhead.BulkheadFullException;
 import org.junit.jupiter.api.Test;
 
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -34,10 +35,39 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class CareerAiGuardServiceTest {
+
+    /**
+     * 验证所有职业 AI 核心场景都有显式守卫策略。
+     */
+    @Test
+    void coreCareerAiScenesResolveExplicitGuardPolicy() {
+        CareerAiGuardProperties properties = new CareerAiGuardProperties();
+        List<String> scenes = List.of(
+                "RESUME_PARSE",
+                "JD_PARSE",
+                "JD_ALIGNMENT",
+                "OPTIMIZATION_EXECUTOR",
+                "OPTIMIZATION_REVIEW",
+                "INTERVIEW_PLAN",
+                "INTERVIEW_EVALUATE",
+                "INTERVIEW_REPORT"
+        );
+
+        for (String scene : scenes) {
+            CareerAiGuardProperties.StagePolicy policy = properties.resolvePolicy(scene);
+            assertNotNull(policy, scene + " policy must exist");
+            assertEquals(50, policy.getFailureRateThreshold(), scene);
+            assertEquals(20, policy.getBulkheadMaxConcurrentCalls(), scene);
+            assertEquals(3, policy.getRetryMaxAttempts(), scene);
+        }
+        assertEquals(Duration.ofSeconds(8), properties.resolvePolicy("INTERVIEW_EVALUATE").getTimeout());
+        assertEquals(Duration.ofSeconds(8), properties.resolvePolicy("INTERVIEW_REPORT").getTimeout());
+    }
 
     /**
      * 验证同一守卫能按场景取得特定超时配置，未知场景使用默认配置。

@@ -162,7 +162,7 @@ public class CareerAiGuardService {
     }
 
     /**
-     * 判断异常是否应被重试。
+     * 判断异常是否应该触发重试。
      */
     private boolean shouldRetry(Throwable throwable) {
         Throwable actual = unwrap(throwable);
@@ -174,7 +174,7 @@ public class CareerAiGuardService {
     }
 
     /**
-     * 判断异常是否应计入断路器失败率。
+     * 判断异常是否应该计入断路器失败率。
      */
     private boolean shouldRecordCircuitBreakerFailure(Throwable throwable) {
         return !isDuplicateRunningException(unwrap(throwable));
@@ -198,7 +198,7 @@ public class CareerAiGuardService {
     }
 
     /**
-     * 展开异步执行包装异常。
+     * 展开异步执行包装异常，返回真实业务异常。
      */
     private Throwable unwrap(Throwable throwable) {
         Throwable current = throwable;
