@@ -159,7 +159,7 @@ services:
       RAGENT_RENDER_FONT_PATH: /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
     command: >
       sh -c "apt-get update &&
-      apt-get install -y --no-install-recommends fonts-noto-cjk &&
+      apt-get install -y --no-install-recommends curl fonts-noto-cjk &&
       rm -rf /var/lib/apt/lists/* &&
       chmod +x mvnw &&
       ./mvnw -pl bootstrap -am spring-boot:run"
@@ -168,6 +168,12 @@ services:
     volumes:
       - ../..:/workspace
       - ragent-maven-cache:/root/.m2
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9090/api/ragent/actuator/health/readiness || exit 1"]
+      interval: 15s
+      timeout: 5s
+      start_period: 90s
+      retries: 10
 
   ragent-frontend:
     image: node:20-alpine

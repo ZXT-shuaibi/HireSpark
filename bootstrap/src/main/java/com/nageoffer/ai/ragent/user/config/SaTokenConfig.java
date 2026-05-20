@@ -22,6 +22,8 @@ public class SaTokenConfig implements WebMvcConfigurer {
 
     private static final String[] PUBLIC_PATH_PATTERNS = {
             "/auth/**",
+            "/actuator/health",
+            "/actuator/health/**",
             "/error",
             "/swagger-ui.html",
             "/swagger-ui/**",

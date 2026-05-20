@@ -3,6 +3,22 @@ server:
   servlet:
     context-path: /api/ragent
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+
 spring:
   application:
     name: ragent${unique-name:}-service
