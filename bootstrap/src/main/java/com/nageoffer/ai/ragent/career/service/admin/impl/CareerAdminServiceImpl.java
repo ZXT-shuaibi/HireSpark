@@ -21,11 +21,13 @@ import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.nageoffer.ai.ragent.career.controller.vo.admin.CareerAdminAgentTraceVO;
 import com.nageoffer.ai.ragent.career.controller.vo.admin.CareerAdminOverviewVO;
 import com.nageoffer.ai.ragent.career.controller.vo.admin.CareerAdminRubricDimensionVO;
 import com.nageoffer.ai.ragent.career.controller.vo.admin.CareerAdminRubricVO;
 import com.nageoffer.ai.ragent.career.controller.vo.admin.CareerAdminTaskItemVO;
 import com.nageoffer.ai.ragent.career.dao.entity.CandidateProfileDO;
+import com.nageoffer.ai.ragent.career.dao.entity.CareerAgentExecutionTraceDO;
 import com.nageoffer.ai.ragent.career.dao.entity.CareerSingleFlightRecordDO;
 import com.nageoffer.ai.ragent.career.dao.entity.CareerTaskAttemptDO;
 import com.nageoffer.ai.ragent.career.dao.entity.InterviewReportDO;
@@ -51,6 +53,7 @@ import com.nageoffer.ai.ragent.career.dao.mapper.ResumeOptimizationTaskMapper;
 import com.nageoffer.ai.ragent.career.dao.mapper.ResumeVersionMapper;
 import com.nageoffer.ai.ragent.career.enums.OptimizationReviewStatus;
 import com.nageoffer.ai.ragent.career.service.admin.CareerAdminService;
+import com.nageoffer.ai.ragent.career.service.observability.CareerAgentTraceService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -96,6 +99,8 @@ public class CareerAdminServiceImpl implements CareerAdminService {
     private final CareerTaskAttemptMapper careerTaskAttemptMapper;
 
     private final ResumeExportRecordMapper resumeExportRecordMapper;
+
+    private final CareerAgentTraceService careerAgentTraceService;
 
     @Override
     public CareerAdminOverviewVO overview() {
@@ -210,6 +215,39 @@ public class CareerAdminServiceImpl implements CareerAdminService {
                         ))
                         .build()
         );
+    }
+
+    /**
+     * 查询最近的 Agent 调用观测记录，并转换为管理端稳定视图。
+     */
+    @Override
+    public List<CareerAdminAgentTraceVO> agentTraces(Integer limit, String agentType, String status) {
+        return careerAgentTraceService.listRecentExecutions(limit, agentType, status).stream()
+                .map(this::toAgentTrace)
+                .toList();
+    }
+
+    /**
+     * 将 Agent 调用记录转换为管理端视图。
+     */
+    private CareerAdminAgentTraceVO toAgentTrace(CareerAgentExecutionTraceDO trace) {
+        return CareerAdminAgentTraceVO.builder()
+                .id(trace.getId())
+                .agentType(trace.getAgentType())
+                .scene(trace.getScene())
+                .sessionId(trace.getSessionId())
+                .userId(trace.getUserId())
+                .traceId(trace.getTraceId())
+                .modelName(trace.getModelName())
+                .status(trace.getStatus())
+                .inputSummary(trace.getInputSummary())
+                .outputSummary(trace.getOutputSummary())
+                .latencyMs(trace.getLatencyMs())
+                .errorType(trace.getErrorType())
+                .errorMessage(trace.getErrorMessage())
+                .createTime(trace.getCreateTime())
+                .updateTime(trace.getUpdateTime())
+                .build();
     }
 
     private CareerAdminTaskItemVO toResumeDocumentTask(ResumeDocumentDO document) {

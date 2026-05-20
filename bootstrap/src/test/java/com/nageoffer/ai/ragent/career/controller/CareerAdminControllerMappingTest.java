@@ -47,5 +47,12 @@ class CareerAdminControllerMappingTest {
                 new String[]{"/rubrics"},
                 CareerAdminController.class.getMethod("rubrics").getAnnotation(GetMapping.class).value()
         );
+        assertArrayEquals(
+                new String[]{"/agent-traces"},
+                CareerAdminController.class
+                        .getMethod("agentTraces", Integer.class, String.class, String.class)
+                        .getAnnotation(GetMapping.class)
+                        .value()
+        );
     }
 }

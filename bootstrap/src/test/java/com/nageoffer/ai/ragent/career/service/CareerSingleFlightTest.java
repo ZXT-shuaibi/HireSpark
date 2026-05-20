@@ -20,6 +20,7 @@ package com.nageoffer.ai.ragent.career.service;
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.conditions.Wrapper;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.nageoffer.ai.ragent.career.dao.entity.CareerAgentExecutionTraceDO;
 import com.nageoffer.ai.ragent.career.dao.entity.CareerTaskAttemptDO;
 import com.nageoffer.ai.ragent.career.dao.entity.CareerSingleFlightRecordDO;
 import com.nageoffer.ai.ragent.career.dao.mapper.CareerTaskAttemptMapper;
@@ -28,6 +29,8 @@ import com.nageoffer.ai.ragent.career.service.attempt.CareerTaskAttemptRecorder;
 import com.nageoffer.ai.ragent.career.service.guard.CareerAiGuardProperties;
 import com.nageoffer.ai.ragent.career.service.guard.CareerAiGuardService;
 import com.nageoffer.ai.ragent.career.service.guard.CareerAiGuardTimeoutException;
+import com.nageoffer.ai.ragent.career.service.observability.CareerAgentTraceCommand;
+import com.nageoffer.ai.ragent.career.service.observability.CareerAgentTraceService;
 import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightHeartbeatManager;
 import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightService;
 import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightLocalReplayCache;
@@ -71,6 +74,8 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -713,6 +718,37 @@ class CareerSingleFlightTest {
         assertTrue(attempt.getPromptSummary().contains("sha256="));
         assertFalse(attempt.getPromptSummary().contains("resume and JD evidence"));
         assertTrue(attempt.getLatencyMs() >= 0);
+    }
+
+    @Test
+    void llmWrapperPublishesAgentTraceForModelCall() {
+        stubPersistence();
+        stubAttemptPersistence();
+        CareerAgentTraceService traceService = mock(CareerAgentTraceService.class);
+        CareerAgentExecutionTraceDO trace = CareerAgentExecutionTraceDO.builder()
+                .id("agent-trace-1")
+                .traceId("trace-task-1")
+                .build();
+        when(traceService.startExecution(any(CareerAgentTraceCommand.class))).thenReturn(trace);
+        CareerSingleFlightLlmServiceImpl wrapper = new CareerSingleFlightLlmServiceImpl(
+                newService(),
+                llmService,
+                new CareerTaskAttemptRecorder(attemptMapper),
+                newGuardService(),
+                newTestSingleFlightProperties(),
+                new CareerSingleFlightLocalReplayCache(),
+                new CareerSingleFlightHeartbeatManager(),
+                traceService);
+        when(llmService.chat(any(ChatRequest.class))).thenReturn("model-result");
+
+        String result = wrapper.chat("OPTIMIZATION_EXECUTOR",
+                "OPTIMIZATION_EXECUTOR:user-1:task-1:prompt-body",
+                "trace-task-1",
+                ChatRequest.builder().messages(List.of(ChatMessage.user("prompt-body"))).build());
+
+        assertEquals("model-result", result);
+        verify(traceService).startExecution(any(CareerAgentTraceCommand.class));
+        verify(traceService).finishSuccess(eq(trace), eq("model-result"), anyLong());
     }
 
     @Test

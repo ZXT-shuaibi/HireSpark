@@ -17,6 +17,7 @@
 
 package com.nageoffer.ai.ragent.career.controller.admin;
 
+import com.nageoffer.ai.ragent.career.controller.vo.admin.CareerAdminAgentTraceVO;
 import com.nageoffer.ai.ragent.career.controller.vo.admin.CareerAdminOverviewVO;
 import com.nageoffer.ai.ragent.career.controller.vo.admin.CareerAdminRubricVO;
 import com.nageoffer.ai.ragent.career.controller.vo.admin.CareerAdminTaskItemVO;
@@ -53,5 +54,15 @@ public class CareerAdminController {
     @GetMapping("/rubrics")
     public Result<List<CareerAdminRubricVO>> rubrics() {
         return Results.success(careerAdminService.rubrics());
+    }
+
+    /**
+     * 查询最近的 Career Agent 调用观测记录。
+     */
+    @GetMapping("/agent-traces")
+    public Result<List<CareerAdminAgentTraceVO>> agentTraces(@RequestParam(defaultValue = "20") Integer limit,
+                                                             @RequestParam(required = false) String agentType,
+                                                             @RequestParam(required = false) String status) {
+        return Results.success(careerAdminService.agentTraces(limit, agentType, status));
     }
 }

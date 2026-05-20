@@ -19,10 +19,12 @@ package com.nageoffer.ai.ragent.career.service;
 
 import com.baomidou.mybatisplus.core.MybatisConfiguration;
 import com.baomidou.mybatisplus.core.metadata.TableInfoHelper;
+import com.nageoffer.ai.ragent.career.controller.vo.admin.CareerAdminAgentTraceVO;
 import com.nageoffer.ai.ragent.career.controller.vo.admin.CareerAdminOverviewVO;
 import com.nageoffer.ai.ragent.career.controller.vo.admin.CareerAdminRubricVO;
 import com.nageoffer.ai.ragent.career.controller.vo.admin.CareerAdminTaskItemVO;
 import com.nageoffer.ai.ragent.career.dao.entity.CandidateProfileDO;
+import com.nageoffer.ai.ragent.career.dao.entity.CareerAgentExecutionTraceDO;
 import com.nageoffer.ai.ragent.career.dao.entity.CareerSingleFlightRecordDO;
 import com.nageoffer.ai.ragent.career.dao.entity.CareerTaskAttemptDO;
 import com.nageoffer.ai.ragent.career.dao.entity.InterviewReportDO;
@@ -51,6 +53,7 @@ import com.nageoffer.ai.ragent.career.enums.InterviewSessionStatus;
 import com.nageoffer.ai.ragent.career.enums.OptimizationReviewStatus;
 import com.nageoffer.ai.ragent.career.service.admin.CareerAdminService;
 import com.nageoffer.ai.ragent.career.service.admin.impl.CareerAdminServiceImpl;
+import com.nageoffer.ai.ragent.career.service.observability.CareerAgentTraceService;
 import org.apache.ibatis.builder.MapperBuilderAssistant;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -106,6 +109,9 @@ class CareerAdminServiceTest {
 
     @Mock
     private ResumeExportRecordMapper resumeExportRecordMapper;
+
+    @Mock
+    private CareerAgentTraceService careerAgentTraceService;
 
     @BeforeAll
     static void initMyBatisPlusLambdaCache() {
@@ -211,6 +217,35 @@ class CareerAdminServiceTest {
         assertFalse(rubrics.get(1).getEditable());
     }
 
+    @Test
+    void agentTracesExposeRecentObservabilityRecords() {
+        when(careerAgentTraceService.listRecentExecutions(20, "INTERVIEW_EVALUATE", "SUCCESS"))
+                .thenReturn(List.of(CareerAgentExecutionTraceDO.builder()
+                        .id("agent-trace-1")
+                        .agentType("INTERVIEW_EVALUATE")
+                        .scene("INTERVIEW")
+                        .sessionId("session-1")
+                        .userId("user-1")
+                        .traceId("trace-agent-1")
+                        .modelName("RagentModelRouter")
+                        .status("SUCCESS")
+                        .inputSummary("messages=1, sha256=abc")
+                        .outputSummary("chars=20, sha256=def")
+                        .latencyMs(88L)
+                        .createTime(new Date(8000L))
+                        .updateTime(new Date(8000L))
+                        .build()));
+
+        List<CareerAdminAgentTraceVO> traces =
+                newService().agentTraces(20, "INTERVIEW_EVALUATE", "SUCCESS");
+
+        assertEquals(1, traces.size());
+        assertEquals("agent-trace-1", traces.get(0).getId());
+        assertEquals("INTERVIEW_EVALUATE", traces.get(0).getAgentType());
+        assertEquals(88L, traces.get(0).getLatencyMs());
+        assertTrue(traces.get(0).getInputSummary().contains("sha256="));
+    }
+
     private CareerAdminService newService() {
         return new CareerAdminServiceImpl(
                 resumeDocumentMapper,
@@ -224,7 +259,8 @@ class CareerAdminServiceTest {
                 interviewReportMapper,
                 careerSingleFlightRecordMapper,
                 careerTaskAttemptMapper,
-                resumeExportRecordMapper
+                resumeExportRecordMapper,
+                careerAgentTraceService
         );
     }
 

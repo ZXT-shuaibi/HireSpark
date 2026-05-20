@@ -15,22 +15,10 @@
  * limitations under the License.
  */
 
-package com.nageoffer.ai.ragent.career.service.admin;
+package com.nageoffer.ai.ragent.career.dao.mapper;
 
-import com.nageoffer.ai.ragent.career.controller.vo.admin.CareerAdminOverviewVO;
-import com.nageoffer.ai.ragent.career.controller.vo.admin.CareerAdminAgentTraceVO;
-import com.nageoffer.ai.ragent.career.controller.vo.admin.CareerAdminRubricVO;
-import com.nageoffer.ai.ragent.career.controller.vo.admin.CareerAdminTaskItemVO;
+import com.baomidou.mybatisplus.core.mapper.BaseMapper;
+import com.nageoffer.ai.ragent.career.dao.entity.CareerAgentToolInvocationDO;
 
-import java.util.List;
-
-public interface CareerAdminService {
-
-    CareerAdminOverviewVO overview();
-
-    List<CareerAdminTaskItemVO> tasks(Integer limit, String type, String status);
-
-    List<CareerAdminRubricVO> rubrics();
-
-    List<CareerAdminAgentTraceVO> agentTraces(Integer limit, String agentType, String status);
+public interface CareerAgentToolInvocationMapper extends BaseMapper<CareerAgentToolInvocationDO> {
 }

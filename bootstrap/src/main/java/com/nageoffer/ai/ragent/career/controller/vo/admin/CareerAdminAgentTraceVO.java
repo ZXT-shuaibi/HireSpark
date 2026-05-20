@@ -15,22 +15,48 @@
  * limitations under the License.
  */
 
-package com.nageoffer.ai.ragent.career.service.admin;
+package com.nageoffer.ai.ragent.career.controller.vo.admin;
 
-import com.nageoffer.ai.ragent.career.controller.vo.admin.CareerAdminOverviewVO;
-import com.nageoffer.ai.ragent.career.controller.vo.admin.CareerAdminAgentTraceVO;
-import com.nageoffer.ai.ragent.career.controller.vo.admin.CareerAdminRubricVO;
-import com.nageoffer.ai.ragent.career.controller.vo.admin.CareerAdminTaskItemVO;
+import lombok.AllArgsConstructor;
+import lombok.Builder;
+import lombok.Data;
+import lombok.NoArgsConstructor;
 
-import java.util.List;
+import java.util.Date;
 
-public interface CareerAdminService {
+@Data
+@Builder
+@NoArgsConstructor
+@AllArgsConstructor
+public class CareerAdminAgentTraceVO {
 
-    CareerAdminOverviewVO overview();
+    private String id;
 
-    List<CareerAdminTaskItemVO> tasks(Integer limit, String type, String status);
+    private String agentType;
 
-    List<CareerAdminRubricVO> rubrics();
+    private String scene;
 
-    List<CareerAdminAgentTraceVO> agentTraces(Integer limit, String agentType, String status);
+    private String sessionId;
+
+    private String userId;
+
+    private String traceId;
+
+    private String modelName;
+
+    private String status;
+
+    private String inputSummary;
+
+    private String outputSummary;
+
+    private Long latencyMs;
+
+    private String errorType;
+
+    private String errorMessage;
+
+    private Date createTime;
+
+    private Date updateTime;
 }

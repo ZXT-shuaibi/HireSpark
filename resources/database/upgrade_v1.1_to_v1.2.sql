@@ -76,3 +76,66 @@ CREATE INDEX IF NOT EXISTS idx_career_turn_archive_request
     ON t_career_interview_turn_archive (request_id) WHERE deleted = 0;
 CREATE INDEX IF NOT EXISTS idx_career_turn_archive_session
     ON t_career_interview_turn_archive (session_id, seq);
+
+CREATE TABLE IF NOT EXISTS t_career_agent_execution_trace (
+    id             VARCHAR(20)  NOT NULL PRIMARY KEY,
+    agent_type     VARCHAR(64)  NOT NULL,
+    scene          VARCHAR(64)  NOT NULL,
+    session_id     VARCHAR(64),
+    user_id        VARCHAR(20),
+    trace_id       VARCHAR(64),
+    model_name     VARCHAR(128),
+    status         VARCHAR(32)  NOT NULL,
+    input_summary  TEXT,
+    output_summary TEXT,
+    latency_ms     BIGINT       NOT NULL DEFAULT 0,
+    error_type     VARCHAR(64),
+    error_message  TEXT,
+    create_time    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time    TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted        SMALLINT     NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_career_agent_trace_agent ON t_career_agent_execution_trace (agent_type);
+CREATE INDEX IF NOT EXISTS idx_career_agent_trace_scene ON t_career_agent_execution_trace (scene);
+CREATE INDEX IF NOT EXISTS idx_career_agent_trace_session ON t_career_agent_execution_trace (session_id);
+CREATE INDEX IF NOT EXISTS idx_career_agent_trace_status ON t_career_agent_execution_trace (status);
+CREATE INDEX IF NOT EXISTS idx_career_agent_trace_trace ON t_career_agent_execution_trace (trace_id);
+
+CREATE TABLE IF NOT EXISTS t_career_agent_tool_invocation (
+    id                 VARCHAR(20)  NOT NULL PRIMARY KEY,
+    execution_trace_id VARCHAR(20),
+    trace_id           VARCHAR(64),
+    tool_type          VARCHAR(64)  NOT NULL,
+    tool_name          VARCHAR(128) NOT NULL,
+    input_summary      TEXT,
+    output_summary     TEXT,
+    status             VARCHAR(32)  NOT NULL,
+    latency_ms         BIGINT       NOT NULL DEFAULT 0,
+    error_message      TEXT,
+    create_time        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time        TIMESTAMP    NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted            SMALLINT     NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_career_agent_tool_trace_id ON t_career_agent_tool_invocation (execution_trace_id);
+CREATE INDEX IF NOT EXISTS idx_career_agent_tool_trace ON t_career_agent_tool_invocation (trace_id);
+CREATE INDEX IF NOT EXISTS idx_career_agent_tool_name ON t_career_agent_tool_invocation (tool_name);
+
+CREATE TABLE IF NOT EXISTS t_career_agent_session_stats (
+    id               VARCHAR(20) NOT NULL PRIMARY KEY,
+    session_id       VARCHAR(64) NOT NULL,
+    user_id          VARCHAR(20),
+    scene            VARCHAR(64) NOT NULL,
+    total_calls      BIGINT      NOT NULL DEFAULT 0,
+    success_calls    BIGINT      NOT NULL DEFAULT 0,
+    failed_calls     BIGINT      NOT NULL DEFAULT 0,
+    total_latency_ms BIGINT      NOT NULL DEFAULT 0,
+    last_agent_type  VARCHAR(64),
+    last_status      VARCHAR(32),
+    last_trace_id    VARCHAR(64),
+    create_time      TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_time      TIMESTAMP   NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    deleted          SMALLINT    NOT NULL DEFAULT 0
+);
+CREATE UNIQUE INDEX IF NOT EXISTS uk_career_agent_session_stats
+    ON t_career_agent_session_stats (session_id, scene) WHERE deleted = 0;
+CREATE INDEX IF NOT EXISTS idx_career_agent_session_user ON t_career_agent_session_stats (user_id);

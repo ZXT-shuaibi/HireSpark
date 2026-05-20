@@ -20,10 +20,13 @@ package com.nageoffer.ai.ragent.career.service.singleflight;
 import cn.hutool.core.util.StrUtil;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.nageoffer.ai.ragent.career.dao.entity.CareerAgentExecutionTraceDO;
 import com.nageoffer.ai.ragent.career.dao.entity.CareerSingleFlightRecordDO;
 import com.nageoffer.ai.ragent.career.dao.entity.CareerTaskAttemptDO;
 import com.nageoffer.ai.ragent.career.service.attempt.CareerTaskAttemptRecorder;
 import com.nageoffer.ai.ragent.career.service.guard.CareerAiGuardService;
+import com.nageoffer.ai.ragent.career.service.observability.CareerAgentTraceCommand;
+import com.nageoffer.ai.ragent.career.service.observability.CareerAgentTraceService;
 import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
 import com.nageoffer.ai.ragent.framework.exception.ServiceException;
 import com.nageoffer.ai.ragent.infra.chat.LLMService;
@@ -54,6 +57,7 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
     private final CareerSingleFlightProperties singleFlightProperties;
     private final CareerSingleFlightLocalReplayCache localReplayCache;
     private final CareerSingleFlightHeartbeatManager heartbeatManager;
+    private final CareerAgentTraceService careerAgentTraceService;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
@@ -69,7 +73,8 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
                 aiGuardService,
                 new CareerSingleFlightProperties(),
                 new CareerSingleFlightLocalReplayCache(),
-                new CareerSingleFlightHeartbeatManager());
+                new CareerSingleFlightHeartbeatManager(),
+                null);
     }
 
     /**
@@ -86,11 +91,32 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
                 aiGuardService,
                 singleFlightProperties,
                 new CareerSingleFlightLocalReplayCache(),
-                new CareerSingleFlightHeartbeatManager());
+                new CareerSingleFlightHeartbeatManager(),
+                null);
     }
 
     /**
      * 创建带本地 L1 回放和持续心跳续租的 single-flight LLM 包装器。
+     */
+    public CareerSingleFlightLlmServiceImpl(CareerSingleFlightService singleFlightService,
+                                            LLMService llmService,
+                                            CareerTaskAttemptRecorder attemptRecorder,
+                                            CareerAiGuardService aiGuardService,
+                                            CareerSingleFlightProperties singleFlightProperties,
+                                            CareerSingleFlightLocalReplayCache localReplayCache,
+                                            CareerSingleFlightHeartbeatManager heartbeatManager) {
+        this(singleFlightService,
+                llmService,
+                attemptRecorder,
+                aiGuardService,
+                singleFlightProperties,
+                localReplayCache,
+                heartbeatManager,
+                null);
+    }
+
+    /**
+     * 创建带本地 L1 回放、持续心跳续租和 Agent 观测的 single-flight LLM 包装器。
      */
     @Autowired
     public CareerSingleFlightLlmServiceImpl(CareerSingleFlightService singleFlightService,
@@ -99,7 +125,8 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
                                             CareerAiGuardService aiGuardService,
                                             CareerSingleFlightProperties singleFlightProperties,
                                             CareerSingleFlightLocalReplayCache localReplayCache,
-                                            CareerSingleFlightHeartbeatManager heartbeatManager) {
+                                            CareerSingleFlightHeartbeatManager heartbeatManager,
+                                            CareerAgentTraceService careerAgentTraceService) {
         this.singleFlightService = singleFlightService;
         this.llmService = llmService;
         this.attemptRecorder = attemptRecorder;
@@ -107,6 +134,7 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
         this.singleFlightProperties = singleFlightProperties == null ? new CareerSingleFlightProperties() : singleFlightProperties;
         this.localReplayCache = localReplayCache == null ? new CareerSingleFlightLocalReplayCache() : localReplayCache;
         this.heartbeatManager = heartbeatManager == null ? new CareerSingleFlightHeartbeatManager() : heartbeatManager;
+        this.careerAgentTraceService = careerAgentTraceService;
     }
 
     /**
@@ -115,10 +143,13 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
     @Override
     public String chat(String scene, String singleFlightKey, String traceId, ChatRequest request) {
         String key = stableKey(scene, singleFlightKey);
+        CareerAgentExecutionTraceDO agentTrace = startAgentTrace(scene, singleFlightKey, traceId, request);
         Optional<CareerSingleFlightRecordDO> replay = findReplay(key);
         if (replay.isPresent()) {
             attemptRecorder.replayed(scene, singleFlightKey, key, traceId, request);
-            return unwrapResult(replay.get().getResultJson());
+            String result = unwrapResult(replay.get().getResultJson());
+            finishAgentTraceSuccess(agentTrace, result, 0L);
+            return result;
         }
 
         String ownerId = UUID.randomUUID().toString();
@@ -128,17 +159,22 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
         if (acquireResult.replayAvailable() && record != null) {
             cacheReplay(record);
             attemptRecorder.replayed(scene, singleFlightKey, key, traceId, request);
-            return unwrapResult(record.getResultJson());
+            String result = unwrapResult(record.getResultJson());
+            finishAgentTraceSuccess(agentTrace, result, 0L);
+            return result;
         }
         if (!acquireResult.owner()) {
             Optional<CareerSingleFlightRecordDO> available = waitForReplay(key);
             if (available.isPresent()) {
                 attemptRecorder.replayed(scene, singleFlightKey, key, traceId, request);
-                return unwrapResult(available.get().getResultJson());
+                String result = unwrapResult(available.get().getResultJson());
+                finishAgentTraceSuccess(agentTrace, result, 0L);
+                return result;
             }
             CareerTaskAttemptDO attempt = attemptRecorder.start(scene, singleFlightKey, key, traceId, request);
             ServiceException ex = new ServiceException("AI request is already running for the same input and no replay became available within wait timeout");
             attemptRecorder.failed(attempt, ex, 0L);
+            finishAgentTraceFailed(agentTrace, ex, 0L);
             throw ex;
         }
 
@@ -155,11 +191,15 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
                     () -> singleFlightService.heartbeat(key, ownerId, fencingToken));
             String result = aiGuardService.execute(scene, () -> llmService.chat(request));
             completeOwnerSuccess(key, ownerId, fencingToken, result);
-            attemptRecorder.success(attempt, System.currentTimeMillis() - startTime);
+            long latencyMs = System.currentTimeMillis() - startTime;
+            attemptRecorder.success(attempt, latencyMs);
+            finishAgentTraceSuccess(agentTrace, result, latencyMs);
             return result;
         } catch (RuntimeException ex) {
             completeOwnerFailure(key, ownerId, fencingToken, ex);
-            attemptRecorder.failed(attempt, ex, System.currentTimeMillis() - startTime);
+            long latencyMs = System.currentTimeMillis() - startTime;
+            attemptRecorder.failed(attempt, ex, latencyMs);
+            finishAgentTraceFailed(agentTrace, ex, latencyMs);
             throw ex;
         } finally {
             heartbeatManager.stop(heartbeatTaskKey);
@@ -177,6 +217,82 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
         Optional<CareerSingleFlightRecordDO> replay = singleFlightService.replayIfAvailable(key);
         replay.ifPresent(this::cacheReplay);
         return replay;
+    }
+
+    /**
+     * 开始记录 Agent 调用观测，观测失败不阻断主链路。
+     */
+    private CareerAgentExecutionTraceDO startAgentTrace(String scene, String singleFlightKey, String traceId, ChatRequest request) {
+        if (careerAgentTraceService == null) {
+            return null;
+        }
+        AgentContext context = parseAgentContext(scene, singleFlightKey);
+        try {
+            return careerAgentTraceService.startExecution(CareerAgentTraceCommand.builder()
+                    .agentType(context.scene())
+                    .scene(context.businessScene())
+                    .sessionId(context.businessId())
+                    .userId(context.userId())
+                    .traceId(traceId)
+                    .modelName("RagentModelRouter")
+                    .input(request)
+                    .build());
+        } catch (RuntimeException ex) {
+            log.warn("Career Agent 调用观测启动失败，忽略观测写入：scene={}, traceId={}", scene, traceId, ex);
+            return null;
+        }
+    }
+
+    /**
+     * 标记 Agent 调用成功，观测失败不阻断主链路。
+     */
+    private void finishAgentTraceSuccess(CareerAgentExecutionTraceDO trace, String result, long latencyMs) {
+        if (careerAgentTraceService == null || trace == null) {
+            return;
+        }
+        try {
+            careerAgentTraceService.finishSuccess(trace, result, latencyMs);
+        } catch (RuntimeException ex) {
+            log.warn("Career Agent 调用成功观测写入失败，忽略观测写入：traceId={}", trace.getTraceId(), ex);
+        }
+    }
+
+    /**
+     * 标记 Agent 调用失败，观测失败不阻断主链路。
+     */
+    private void finishAgentTraceFailed(CareerAgentExecutionTraceDO trace, RuntimeException failure, long latencyMs) {
+        if (careerAgentTraceService == null || trace == null) {
+            return;
+        }
+        try {
+            careerAgentTraceService.finishFailed(trace, failure, latencyMs);
+        } catch (RuntimeException ex) {
+            log.warn("Career Agent 调用失败观测写入失败，忽略观测写入：traceId={}", trace.getTraceId(), ex);
+        }
+    }
+
+    /**
+     * 从 single-flight 原始键中解析用户和业务对象。
+     */
+    private AgentContext parseAgentContext(String scene, String singleFlightKey) {
+        String normalizedScene = StrUtil.blankToDefault(scene, "CAREER_AI").trim();
+        String businessScene = normalizedScene.contains("INTERVIEW") ? "INTERVIEW"
+                : normalizedScene.contains("OPTIMIZATION") ? "OPTIMIZATION"
+                : normalizedScene.contains("JD") ? "ALIGNMENT"
+                : normalizedScene.contains("RESUME") ? "RESUME"
+                : "CAREER";
+        String userId = null;
+        String businessId = null;
+        if (StrUtil.isNotBlank(singleFlightKey)) {
+            String[] parts = singleFlightKey.split(":", 4);
+            if (parts.length > 1) {
+                userId = blankToNull(parts[1]);
+            }
+            if (parts.length > 2) {
+                businessId = blankToNull(parts[2]);
+            }
+        }
+        return new AgentContext(normalizedScene, businessScene, userId, businessId);
     }
 
     /**
@@ -320,6 +436,13 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
     }
 
     /**
+     * 将空白字符串转换为空值。
+     */
+    private String blankToNull(String value) {
+        return StrUtil.isBlank(value) ? null : value.trim();
+    }
+
+    /**
      * 安静地等待 follower 轮询间隔。
      */
     private void sleepQuietly(long millis) {
@@ -329,5 +452,8 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
             Thread.currentThread().interrupt();
             throw new ServiceException("Interrupted while waiting for single-flight replay");
         }
+    }
+
+    private record AgentContext(String scene, String businessScene, String userId, String businessId) {
     }
 }
