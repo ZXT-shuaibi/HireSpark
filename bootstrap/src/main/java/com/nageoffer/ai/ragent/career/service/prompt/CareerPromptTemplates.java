@@ -89,6 +89,47 @@ public final class CareerPromptTemplates {
             %s
             """;
 
+    public static final String INTERVIEW_JD_ALIGNMENT = """
+            你是 JD 对齐面试 Agent。请在模拟面试开始前，对简历和 JD 做面试视角的对齐分析。
+            输出 JSON 字段必须包含：summary, mustProbeSkills, projectAnchors, riskAreas, interviewFocus。
+            summary 用一句话概括本场面试重点；riskAreas 只记录需要验证的风险，不要下结论。
+            简历 JSON：
+            %s
+            JD JSON：
+            %s
+            检索增强上下文：
+            %s
+            """;
+
+    public static final String INTERVIEW_COORDINATOR_PLAN = """
+            你是面试协调者 Agent。请基于 JD 对齐摘要生成 Plan-and-Execute 面试计划。
+            输出 JSON 字段必须包含：stages, dimensions, questions。
+            stages 每项包含 name, goal, questionBudget；questions 每项包含 type, question, expectedSignals, difficulty, stageName。
+            type 只能是 TECHNICAL、PROJECT_DEEP_DIVE、BEHAVIORAL、MOTIVATION、FOLLOW_UP。
+            简历 JSON：
+            %s
+            JD JSON：
+            %s
+            JD 对齐摘要 JSON：
+            %s
+            检索增强上下文：
+            %s
+            """;
+
+    public static final String INTERVIEW_TECHNICAL_QUESTION = """
+            你是技术面试官 Agent。请根据协调者计划、候选人已回答轮次和当前计划题，生成或选择下一道主问题。
+            输出 JSON 字段必须包含：type, question, expectedSignals, difficulty, stageName。
+            如果计划题已经足够精准，可以改写得更口语化；如果需要深挖，请生成更贴近候选项目经历的问题。
+            协调者计划 JSON：
+            %s
+            当前计划题 JSON：
+            %s
+            当前计划序号：
+            %s
+            已有轮次：
+            %s
+            """;
+
     public static final String INTERVIEW_EVALUATE = """
             你是模拟面试评分官。请评价候选人的回答。
             输出 JSON 字段必须包含：score, feedback, strengths, weaknesses, followUpRequired, followUpQuestion。
@@ -100,6 +141,23 @@ public final class CareerPromptTemplates {
             简历 JSON：
             %s
             JD JSON：
+            %s
+            """;
+
+    public static final String INTERVIEW_REFLECTOR = """
+            你是面试反思 Agent。请基于当前问题、候选人回答、评分结果和历史轮次，裁决下一步流程。
+            输出 JSON 字段必须包含：decision, reason, followUpQuestion。
+            decision 只能是 PROBE、NEXT、STAGE_FINISH、FINISH：
+            PROBE 表示需要进入追问规则链；NEXT 表示进入下一道主问题；STAGE_FINISH 表示当前阶段完成；FINISH 表示整场面试可以结束。
+            面试计划 JSON：
+            %s
+            当前问题：
+            %s
+            候选人回答：
+            %s
+            评分结果 JSON：
+            %s
+            历史轮次：
             %s
             """;
 

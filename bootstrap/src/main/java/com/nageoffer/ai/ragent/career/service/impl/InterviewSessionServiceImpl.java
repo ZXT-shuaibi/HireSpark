@@ -40,6 +40,7 @@ import com.nageoffer.ai.ragent.career.service.flow.InterviewFlowStateMachine;
 import com.nageoffer.ai.ragent.career.service.followup.InterviewFollowUpDecision;
 import com.nageoffer.ai.ragent.career.service.followup.InterviewFollowUpDecisionRequest;
 import com.nageoffer.ai.ragent.career.service.followup.InterviewFollowUpDecisionService;
+import com.nageoffer.ai.ragent.career.service.interview.InterviewPlanExecuteReflectService;
 import com.nageoffer.ai.ragent.career.service.parser.CareerJsonParser;
 import com.nageoffer.ai.ragent.career.service.recovery.InterviewSessionRecoveryService;
 import com.nageoffer.ai.ragent.career.service.prompt.CareerPromptTemplates;
@@ -55,6 +56,7 @@ import com.nageoffer.ai.ragent.framework.exception.ClientException;
 import com.nageoffer.ai.ragent.framework.exception.ServiceException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
@@ -87,6 +89,15 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
     private final CareerProgressStreamService careerProgressStreamService;
     private final PlatformTransactionManager transactionManager;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private InterviewPlanExecuteReflectService interviewPlanExecuteReflectService;
+
+    /**
+     * 注入面试 Plan-and-Execute 编排服务，缺省时保留原线性流程以兼容单测和降级。
+     */
+    @Autowired(required = false)
+    public void setInterviewPlanExecuteReflectService(InterviewPlanExecuteReflectService interviewPlanExecuteReflectService) {
+        this.interviewPlanExecuteReflectService = interviewPlanExecuteReflectService;
+    }
 
     @Transactional(rollbackFor = Exception.class)
     @Override
@@ -428,26 +439,41 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
                                         String userId) {
         interviewTurnRuntimeService.markFollowUpDeciding(currentTurn);
         List<InterviewTurnDO> sessionTurns = listSessionTurns(session.getId());
+        InterviewPlanExecuteReflectService.ReflectionResult reflection =
+                reflectAfterEvaluation(session, currentTurn, evaluation, sessionTurns);
+        EvaluationResult effectiveEvaluation = applyReflection(evaluation, reflection);
         InterviewFollowUpDecision followUpDecision = interviewFollowUpDecisionService.decide(
                 new InterviewFollowUpDecisionRequest(
                         currentTurn,
                         sessionTurns,
-                        evaluation.score(),
-                        evaluation.feedback(),
-                        evaluation.followUpRequired(),
-                        evaluation.followUpQuestion(),
+                        effectiveEvaluation.score(),
+                        effectiveEvaluation.feedback(),
+                        effectiveEvaluation.followUpRequired(),
+                        effectiveEvaluation.followUpQuestion(),
                         session.getStatus()));
-        appendFollowUpDecisionAudit(currentTurn, evaluation.feedback(), followUpDecision);
+        appendFollowUpDecisionAudit(currentTurn, effectiveEvaluation.feedback(), followUpDecision);
         if (followUpDecision.required()) {
             InterviewTurnDO followUp = createFollowUpTurn(session, currentTurn, followUpDecision.question(), userId);
             session.setCurrentTurnNo(followUp.getTurnNo());
             interviewTurnRuntimeService.markFollowUpCreated(currentTurn);
             return;
         }
+        if (interviewPlanExecuteReflectService != null
+                && interviewPlanExecuteReflectService.shouldFinish(reflection)) {
+            InterviewFlowStateMachine.applySessionStatus(session, InterviewSessionStatus.COMPLETED);
+            interviewTurnRuntimeService.markSessionCompleted(currentTurn);
+            return;
+        }
         int nextPlanIndex = nextPlannedQuestionIndex(sessionTurns);
-        List<Map<String, Object>> questions = readQuestions(readPlan(session.getPlanJson()));
+        Map<String, Object> plan = readPlan(session.getPlanJson());
+        List<Map<String, Object>> questions = readQuestions(plan);
         if (nextPlanIndex <= questions.size()) {
-            InterviewTurnDO next = createPlannedTurn(session, questions.get(nextPlanIndex - 1),
+            Map<String, Object> question = selectNextMainQuestion(session,
+                    plan,
+                    sessionTurns,
+                    questions.get(nextPlanIndex - 1),
+                    nextPlanIndex);
+            InterviewTurnDO next = createPlannedTurn(session, question,
                     nextTurnNo(session.getId()), userId);
             session.setCurrentTurnNo(next.getTurnNo());
             interviewTurnRuntimeService.markNextMainCreated(currentTurn);
@@ -455,6 +481,49 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
             InterviewFlowStateMachine.applySessionStatus(session, InterviewSessionStatus.COMPLETED);
             interviewTurnRuntimeService.markSessionCompleted(currentTurn);
         }
+    }
+
+    /**
+     * 调用反思 Agent 生成流程裁决，失败时保留原评分结果推进。
+     */
+    private InterviewPlanExecuteReflectService.ReflectionResult reflectAfterEvaluation(InterviewSessionDO session,
+                                                                                       InterviewTurnDO currentTurn,
+                                                                                       EvaluationResult evaluation,
+                                                                                       List<InterviewTurnDO> sessionTurns) {
+        if (interviewPlanExecuteReflectService == null) {
+            return null;
+        }
+        try {
+            return interviewPlanExecuteReflectService.reflectAfterEvaluation(session,
+                    currentTurn,
+                    new InterviewPlanExecuteReflectService.EvaluationSnapshot(evaluation.score(),
+                            evaluation.feedback(),
+                            evaluation.followUpRequired(),
+                            evaluation.followUpQuestion()),
+                    sessionTurns);
+        } catch (RuntimeException ex) {
+            log.warn("面试反思 Agent 裁决失败，回退原评分推进：sessionId={}, turnNo={}",
+                    session.getId(), currentTurn.getTurnNo(), ex);
+            return null;
+        }
+    }
+
+    /**
+     * 将反思 Agent 裁决合并进现有追问规则链输入。
+     */
+    private EvaluationResult applyReflection(EvaluationResult evaluation,
+                                             InterviewPlanExecuteReflectService.ReflectionResult reflection) {
+        if (reflection == null) {
+            return evaluation;
+        }
+        Map<String, Object> feedback = evaluation.feedback() == null
+                ? new LinkedHashMap<>()
+                : new LinkedHashMap<>(evaluation.feedback());
+        feedback.put("planExecuteReflect", reflection.auditPayload());
+        boolean followUpRequired = Boolean.TRUE.equals(evaluation.followUpRequired())
+                || Boolean.TRUE.equals(reflection.followUpRequired());
+        String followUpQuestion = firstNonBlank(reflection.followUpQuestion(), evaluation.followUpQuestion());
+        return new EvaluationResult(evaluation.score(), feedback, followUpRequired, followUpQuestion);
     }
 
     /**
@@ -530,6 +599,21 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
     private Map<String, Object> generatePlan(ResumeVersionDO resumeVersion, JobDescriptionDO job) {
         CareerRetrievalEnhancement retrievalEnhancement =
                 careerRetrievalEnhancementService.enhanceInterview(resumeVersion, job, "interview plan");
+        if (interviewPlanExecuteReflectService != null) {
+            try {
+                InterviewPlanExecuteReflectService.InitialPlanResult result =
+                        interviewPlanExecuteReflectService.createInitialPlan(resumeVersion, job, retrievalEnhancement);
+                if (readQuestions(result.plan()).isEmpty()) {
+                    throw new ClientException("Interview plan must contain at least one question");
+                }
+                return result.plan();
+            } catch (ClientException ex) {
+                throw ex;
+            } catch (RuntimeException ex) {
+                log.warn("面试多 Agent 编排生成计划失败，回退线性计划生成：resumeVersionId={}, jdId={}",
+                        resumeVersion.getId(), job.getId(), ex);
+            }
+        }
         String prompt = appendRetrievalEvidence(String.format(CareerPromptTemplates.INTERVIEW_PLAN,
                 defaultJson(resumeVersion.getContentJson()),
                 defaultJson(job.getParsedJson())), retrievalEnhancement);
@@ -546,6 +630,35 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
             throw new ClientException("Interview plan must contain at least one question");
         }
         return plan;
+    }
+
+    /**
+     * 由技术面试官 Agent 生成或选择下一道主问题，失败时回退协调者计划题。
+     */
+    private Map<String, Object> selectNextMainQuestion(InterviewSessionDO session,
+                                                       Map<String, Object> plan,
+                                                       List<InterviewTurnDO> sessionTurns,
+                                                       Map<String, Object> plannedQuestion,
+                                                       int questionIndex) {
+        if (interviewPlanExecuteReflectService == null) {
+            return plannedQuestion;
+        }
+        try {
+            Map<String, Object> generated = interviewPlanExecuteReflectService.selectNextMainQuestion(
+                    session, plan, sessionTurns, plannedQuestion, questionIndex);
+            return hasQuestion(generated) ? generated : plannedQuestion;
+        } catch (RuntimeException ex) {
+            log.warn("技术面试官 Agent 生成下一题失败，回退计划题：sessionId={}, questionIndex={}",
+                    session.getId(), questionIndex, ex);
+            return plannedQuestion;
+        }
+    }
+
+    /**
+     * 判断问题对象是否包含可用题干。
+     */
+    private boolean hasQuestion(Map<String, Object> question) {
+        return question != null && StrUtil.isNotBlank(extractString(question.get("question")));
     }
 
     private List<Map<String, Object>> readQuestions(Map<String, Object> plan) {
@@ -910,6 +1023,13 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
         }
         String text = String.valueOf(value).trim();
         return text.isEmpty() ? null : text;
+    }
+
+    /**
+     * 返回第一个非空白文本。
+     */
+    private String firstNonBlank(String first, String second) {
+        return StrUtil.isNotBlank(first) ? first : second;
     }
 
     private String requireUserId() {
