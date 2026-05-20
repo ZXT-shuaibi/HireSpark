@@ -3,6 +3,67 @@
     {
       "name": "rag.vector.type",
       "type": "java.lang.String",
-      "description": "Description for rag.vector.type."
-  }
-] }
+      "description": "Vector store implementation: pg or milvus."
+    },
+    {
+      "name": "rag.memory.hybrid-enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether conversation memory compression should use recent/protected/summarizable hybrid planning."
+    },
+    {
+      "name": "rag.memory.recent-keep-messages",
+      "type": "java.lang.Integer",
+      "description": "Number of newest messages kept out of each compression candidate window."
+    },
+    {
+      "name": "rag.memory.important-message-threshold",
+      "type": "java.lang.Integer",
+      "description": "Minimum deterministic importance score required to protect a non-recent message from summarization."
+    },
+    {
+      "name": "rag.memory.summary-max-source-messages",
+      "type": "java.lang.Integer",
+      "description": "Maximum low-importance source messages sent into one summary generation request."
+    },
+    {
+      "name": "rag.memory.token-trigger-threshold",
+      "type": "java.lang.Integer",
+      "description": "Approximate future token threshold for triggering memory compaction."
+    },
+    {
+      "name": "rag.memory.stage-switch-trigger-enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether memory compaction can be triggered by an explicit conversation or agent stage switch."
+    },
+    {
+      "name": "rag.memory.recovery-trigger-enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether memory compaction can be triggered after a session recovery event."
+    },
+    {
+      "name": "career.render.font.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether resume export should register governed fonts for PDF rendering."
+    },
+    {
+      "name": "career.render.font.pdf-family",
+      "type": "java.lang.String",
+      "description": "Font family name used when registering PDF fonts."
+    },
+    {
+      "name": "career.render.font.fail-on-missing-fonts",
+      "type": "java.lang.Boolean",
+      "description": "Fail PDF rendering when no configured font resource can be loaded."
+    },
+    {
+      "name": "career.render.font.css-families",
+      "type": "java.util.List<java.lang.String>",
+      "description": "CSS font-family stack emitted into rendered resume HTML."
+    },
+    {
+      "name": "career.render.font.paths",
+      "type": "java.util.List<java.lang.String>",
+      "description": "Ordered classpath: or file: font resources used by openhtmltopdf."
+    }
+  ]
+}

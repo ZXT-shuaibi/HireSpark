@@ -67,6 +67,13 @@ rag:
     summary-start-turns: 5
     summary-enabled: true
     summary-max-chars: 200
+    hybrid-enabled: true
+    recent-keep-messages: 6
+    important-message-threshold: 70
+    summary-max-source-messages: 30
+    token-trigger-threshold: 8000
+    stage-switch-trigger-enabled: true
+    recovery-trigger-enabled: true
     title-max-length: 30
 
   semaphore:
@@ -115,6 +122,29 @@ career:
     text-interview: true
     voice-interview: false
     demeanor-analysis: false
+  render:
+    font:
+      enabled: true
+      pdf-family: Noto Sans SC
+      fail-on-missing-fonts: false
+      css-families:
+        - Noto Sans SC
+        - Noto Sans CJK SC
+        - Microsoft YaHei
+        - SimHei
+        - SimSun
+        - Arial
+        - sans-serif
+      paths:
+        - ${RAGENT_RENDER_FONT_PATH:}
+        - classpath:/fonts/NotoSansSC-Regular.ttf
+        - file:C:/Windows/Fonts/NotoSansSC-VF.ttf
+        - file:C:/Windows/Fonts/simhei.ttf
+        - file:/usr/share/fonts/truetype/noto/NotoSansSC-Regular.ttf
+        - file:/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
+        - file:/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.otf
+        - file:/usr/local/share/fonts/NotoSansSC-Regular.ttf
+        - file:/System/Library/Fonts/PingFang.ttc
   voice:
     xunfei-ast:
       enabled: false
@@ -224,3 +254,11 @@ sa-token:
 
 app:
   demo-mode: false
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha
