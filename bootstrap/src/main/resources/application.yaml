@@ -115,6 +115,10 @@ career:
     text-interview: true
     voice-interview: false
     demeanor-analysis: false
+  websocket:
+    allowed-origin-patterns:
+      - http://localhost:*
+      - http://127.0.0.1:*
 
 ai:
   providers:
