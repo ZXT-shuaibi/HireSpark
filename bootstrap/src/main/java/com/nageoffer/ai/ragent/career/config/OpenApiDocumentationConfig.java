@@ -33,4 +33,23 @@ public class OpenApiDocumentationConfig {
                 .pathsToMatch("/admin/career/**")
                 .build();
     }
+
+    @Bean
+    public GroupedOpenApi careerRuntimeApi() {
+        return GroupedOpenApi.builder()
+                .group("career-runtime")
+                .pathsToMatch(
+                        "/career/interviews/**",
+                        "/career/optimizations/*/progress/stream"
+                )
+                .build();
+    }
+
+    @Bean
+    public GroupedOpenApi careerExportApi() {
+        return GroupedOpenApi.builder()
+                .group("career-export")
+                .pathsToMatch("/career/resumes/export")
+                .build();
+    }
 }

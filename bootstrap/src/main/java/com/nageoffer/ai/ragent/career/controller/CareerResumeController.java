@@ -25,6 +25,8 @@ import com.nageoffer.ai.ragent.career.controller.vo.CareerResumeVersionVO;
 import com.nageoffer.ai.ragent.career.service.CandidateProfileService;
 import com.nageoffer.ai.ragent.framework.convention.Result;
 import com.nageoffer.ai.ragent.framework.web.Results;
+import io.swagger.v3.oas.annotations.Operation;
+import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -41,38 +43,45 @@ import java.util.List;
 
 @RestController
 @RequiredArgsConstructor
+@Tag(name = "Career Resume", description = "简历上传、版本管理和多格式导出接口")
 public class CareerResumeController {
 
     private final CandidateProfileService candidateProfileService;
 
     @PostMapping(value = "/career/resumes/upload", consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
+    @Operation(summary = "上传并解析简历", description = "上传 PDF、DOCX、Markdown 或纯文本简历，创建候选人画像和初始简历版本")
     public Result<CareerResumeUploadVO> upload(@RequestPart("file") MultipartFile file) {
         return Results.success(candidateProfileService.uploadAndParse(file));
     }
 
     @GetMapping("/career/resumes/versions/{versionId}")
+    @Operation(summary = "查询简历版本", description = "按版本 ID 查询结构化简历内容、解析状态和导出所需元数据")
     public Result<CareerResumeVersionVO> queryVersion(@PathVariable String versionId) {
         return Results.success(candidateProfileService.queryVersion(versionId));
     }
 
     @GetMapping("/career/profiles/{profileId}/versions")
+    @Operation(summary = "查询画像下的简历版本", description = "按候选人画像 ID 查询全部可见简历版本")
     public Result<List<CareerResumeVersionVO>> listVersions(@PathVariable String profileId) {
         return Results.success(candidateProfileService.listVersions(profileId));
     }
 
     @PutMapping("/career/resumes/versions/{versionId}")
+    @Operation(summary = "更新简历版本", description = "保存用户修订后的结构化简历内容")
     public Result<CareerResumeVersionVO> updateVersion(@PathVariable String versionId,
                                                        @RequestBody CareerResumeUpdateRequest request) {
         return Results.success(candidateProfileService.updateVersion(versionId, request));
     }
 
     @DeleteMapping("/career/resumes/versions/{versionId}")
+    @Operation(summary = "删除简历版本", description = "删除简历版本并使关联导出记录和下载链接失效")
     public Result<Void> deleteVersion(@PathVariable String versionId) {
         candidateProfileService.deleteVersion(versionId);
         return Results.success();
     }
 
     @PostMapping("/career/resumes/export")
+    @Operation(summary = "导出简历", description = "按指定格式导出简历，并记录模板版本、渲染引擎、traceId 和校验结果")
     public Result<CareerResumeExportVO> export(@RequestBody CareerResumeExportRequest request) {
         return Results.success(candidateProfileService.export(request));
     }
