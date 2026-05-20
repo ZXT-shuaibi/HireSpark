@@ -41,7 +41,8 @@ public class CareerProgressStreamServiceImpl implements CareerProgressStreamServ
     private static final long STREAM_TIMEOUT_MS = TimeUnit.MINUTES.toMillis(30);
     private static final String BUSINESS_TYPE_OPTIMIZATION = "OPTIMIZATION";
     private static final String BUSINESS_TYPE_INTERVIEW = "INTERVIEW";
-    private static final Set<String> TERMINAL_EVENT_TYPES = Set.of("PASSED", "NEEDS_REVIEW", "FAILED");
+    private static final Set<String> TERMINAL_EVENT_TYPES = Set.of(
+            "PASSED", "NEEDS_REVIEW", "FAILED", "SESSION_FINISHED", "SESSION_CANCELLED");
 
     private final ConcurrentMap<String, CopyOnWriteArrayList<StreamClient>> clients = new ConcurrentHashMap<>();
 

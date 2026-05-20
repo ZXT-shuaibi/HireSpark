@@ -205,6 +205,60 @@ class InterviewSessionStateTest {
     }
 
     @Test
+    void submitAsrAnswerPersistsSourceAndSanitizedTranscriptionMeta() {
+        login();
+        stubVisibleLinkedObjects(true, true);
+        stubPersistence();
+        seedSessionWithAskedTurn();
+        stubRetrievalEnhancement();
+        when(singleFlightLlmService.chat(anyString(), anyString(), any(), any(ChatRequest.class)))
+                .thenReturn("{\"score\":80}");
+        when(careerJsonParser.parseObject(anyString())).thenReturn(evaluation(false, null));
+        CareerInterviewAnswerRequest request = answer("I handled Redis failover.");
+        request.setAnswerSource("ASR");
+        request.setAnswerRevision("asr-7");
+        request.setAnswerSourceMeta(new LinkedHashMap<>(Map.of(
+                "revision", 7,
+                "resultStatus", "FINAL",
+                "segmentId", 12,
+                "pgs", "rpl",
+                "fullText", "I handled Redis failover."
+        )));
+
+        CareerInterviewTurnVO result = newService().submitAnswer("session-1", request);
+
+        assertEquals("ASR", result.getAnswerSource());
+        assertNotNull(result.getAnswerSourceMeta());
+        assertEquals(7, result.getAnswerSourceMeta().get("revision"));
+        assertEquals("FINAL", result.getAnswerSourceMeta().get("resultStatus"));
+        assertEquals(12, result.getAnswerSourceMeta().get("segmentId"));
+        assertNull(result.getAnswerSourceMeta().get("fullText"));
+        assertEquals("ASR", turns.get(0).getAnswerSource());
+        assertTrue(turns.get(0).getAnswerSourceMetaJson().contains("\"revision\":7"));
+    }
+
+    @Test
+    void submitPlainAnswerDefaultsSourceToTextAndDropsMeta() {
+        login();
+        stubVisibleLinkedObjects(true, true);
+        stubPersistence();
+        seedSessionWithAskedTurn();
+        stubRetrievalEnhancement();
+        when(singleFlightLlmService.chat(anyString(), anyString(), any(), any(ChatRequest.class)))
+                .thenReturn("{\"score\":80}");
+        when(careerJsonParser.parseObject(anyString())).thenReturn(evaluation(false, null));
+        CareerInterviewAnswerRequest request = answer("Plain text answer.");
+        request.setAnswerSource("unknown");
+        request.setAnswerSourceMeta(Map.of("revision", 1));
+
+        CareerInterviewTurnVO result = newService().submitAnswer("session-1", request);
+
+        assertEquals("TEXT", result.getAnswerSource());
+        assertTrue(result.getAnswerSourceMeta().isEmpty());
+        assertNull(turns.get(0).getAnswerSourceMetaJson());
+    }
+
+    @Test
     void duplicateAnswerSubmissionReplaysExistingEvaluationWithoutCreatingFollowUp() {
         login();
         stubVisibleLinkedObjects(true, true);

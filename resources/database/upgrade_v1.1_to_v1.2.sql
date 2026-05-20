@@ -139,3 +139,10 @@ CREATE TABLE IF NOT EXISTS t_career_agent_session_stats (
 CREATE UNIQUE INDEX IF NOT EXISTS uk_career_agent_session_stats
     ON t_career_agent_session_stats (session_id, scene) WHERE deleted = 0;
 CREATE INDEX IF NOT EXISTS idx_career_agent_session_user ON t_career_agent_session_stats (user_id);
+
+ALTER TABLE t_career_interview_turn
+    ADD COLUMN IF NOT EXISTS answer_source VARCHAR(32),
+    ADD COLUMN IF NOT EXISTS answer_source_meta_json JSONB;
+
+COMMENT ON COLUMN t_career_interview_turn.answer_source IS '回答来源：TEXT/ASR';
+COMMENT ON COLUMN t_career_interview_turn.answer_source_meta_json IS '回答来源元数据JSON';

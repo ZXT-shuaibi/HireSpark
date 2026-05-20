@@ -911,6 +911,8 @@ CREATE TABLE t_career_interview_turn (
     turn_type                  VARCHAR(32),
     question                   TEXT,
     answer                     TEXT,
+    answer_source              VARCHAR(32),
+    answer_source_meta_json    JSONB,
     feedback_json              JSONB,
     status                     VARCHAR(32),
     score                      INTEGER,
@@ -937,6 +939,8 @@ COMMENT ON COLUMN t_career_interview_turn.turn_no IS '轮次序号';
 COMMENT ON COLUMN t_career_interview_turn.turn_type IS '轮次类型';
 COMMENT ON COLUMN t_career_interview_turn.question IS '面试问题';
 COMMENT ON COLUMN t_career_interview_turn.answer IS '用户回答';
+COMMENT ON COLUMN t_career_interview_turn.answer_source IS '回答来源：TEXT/ASR';
+COMMENT ON COLUMN t_career_interview_turn.answer_source_meta_json IS '回答来源元数据JSON';
 COMMENT ON COLUMN t_career_interview_turn.feedback_json IS '反馈JSON';
 COMMENT ON COLUMN t_career_interview_turn.status IS '轮次状态';
 COMMENT ON COLUMN t_career_interview_turn.score IS '轮次评分';

@@ -42,6 +42,10 @@ public class CareerInterviewTurnVO {
 
     private String answer;
 
+    private String answerSource;
+
+    private Map<String, Object> answerSourceMeta;
+
     private Integer score;
 
     private Map<String, Object> feedback;

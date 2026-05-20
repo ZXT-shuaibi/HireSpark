@@ -19,6 +19,8 @@ package com.nageoffer.ai.ragent.career.controller.request;
 
 import lombok.Data;
 
+import java.util.Map;
+
 @Data
 public class CareerInterviewAnswerRequest {
 
@@ -27,4 +29,8 @@ public class CareerInterviewAnswerRequest {
     private String answer;
 
     private String answerRevision;
+
+    private String answerSource;
+
+    private Map<String, Object> answerSourceMeta;
 }

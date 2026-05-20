@@ -53,6 +53,11 @@ public class InterviewTurnDO {
 
     private String answer;
 
+    private String answerSource;
+
+    @TableField(typeHandler = JsonbTypeHandler.class)
+    private String answerSourceMetaJson;
+
     @TableField(typeHandler = JsonbTypeHandler.class)
     private String feedbackJson;
 

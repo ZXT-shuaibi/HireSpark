@@ -73,6 +73,10 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class InterviewSessionServiceImpl implements InterviewSessionService {
 
+    private static final String ANSWER_SOURCE_TEXT = "TEXT";
+
+    private static final String ANSWER_SOURCE_ASR = "ASR";
+
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
 
@@ -212,6 +216,10 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
             return toTurnVO(currentTurn);
         }
 
+        currentTurn.setAnswerSource(normalizeAnswerSource(request.getAnswerSource()));
+        currentTurn.setAnswerSourceMetaJson(writeNullableJson(sanitizeAnswerSourceMeta(
+                currentTurn.getAnswerSource(), request.getAnswerSourceMeta()),
+                "Failed to serialize interview answer source meta JSON"));
         interviewTurnRuntimeService.markAnswerSaved(currentTurn, answer, stepIdempotencyKey);
         turnMapper.updateById(currentTurn);
 
@@ -874,6 +882,8 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
                 .turnType(turn.getTurnType())
                 .question(turn.getQuestion())
                 .answer(turn.getAnswer())
+                .answerSource(turn.getAnswerSource())
+                .answerSourceMeta(readOptionalMap(turn.getAnswerSourceMetaJson()))
                 .score(turn.getScore())
                 .feedback(feedback)
                 .status(turn.getStatus())
@@ -909,12 +919,80 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
         }
     }
 
+    /**
+     * 读取可选 JSON 字段，字段为空时返回空 Map，便于前端稳定消费。
+     */
+    private Map<String, Object> readOptionalMap(String value) {
+        if (StrUtil.isBlank(value)) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(value, MAP_TYPE);
+        } catch (Exception ex) {
+            throw new ServiceException("Failed to parse interview optional JSON");
+        }
+    }
+
+    /**
+     * 标准化答案来源，未知来源统一回落到文本输入。
+     */
+    private String normalizeAnswerSource(String answerSource) {
+        String value = trimToNull(answerSource);
+        if (value == null) {
+            return ANSWER_SOURCE_TEXT;
+        }
+        String normalized = value.toUpperCase(Locale.ROOT);
+        return ANSWER_SOURCE_ASR.equals(normalized) ? ANSWER_SOURCE_ASR : ANSWER_SOURCE_TEXT;
+    }
+
+    /**
+     * 清洗答案来源元数据，只保留追溯转写链路需要的轻量字段。
+     */
+    private Map<String, Object> sanitizeAnswerSourceMeta(String answerSource, Map<String, Object> meta) {
+        if (!ANSWER_SOURCE_ASR.equals(answerSource) || meta == null || meta.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, Object> result = new LinkedHashMap<>();
+        copyMetaIfPresent(meta, result, "revision");
+        copyMetaIfPresent(meta, result, "resultStatus");
+        copyMetaIfPresent(meta, result, "segmentId");
+        copyMetaIfPresent(meta, result, "sentenceSeq");
+        copyMetaIfPresent(meta, result, "pgs");
+        copyMetaIfPresent(meta, result, "rg");
+        copyMetaIfPresent(meta, result, "bg");
+        copyMetaIfPresent(meta, result, "ed");
+        copyMetaIfPresent(meta, result, "isFinalPacket");
+        copyMetaIfPresent(meta, result, "durationMs");
+        copyMetaIfPresent(meta, result, "mimeType");
+        return result;
+    }
+
+    /**
+     * 在转写元数据存在且不是完整答案文本时复制到审计载荷。
+     */
+    private void copyMetaIfPresent(Map<String, Object> source, Map<String, Object> target, String key) {
+        Object value = source.get(key);
+        if (value != null) {
+            target.put(key, value);
+        }
+    }
+
     private String writeJson(Object value, String errorMessage) {
         try {
             return objectMapper.writeValueAsString(value);
         } catch (Exception ex) {
             throw new ServiceException(errorMessage);
         }
+    }
+
+    /**
+     * 序列化可选 JSON 字段，空 Map 不落库，避免制造无意义 JSON。
+     */
+    private String writeNullableJson(Map<String, Object> value, String errorMessage) {
+        if (value == null || value.isEmpty()) {
+            return null;
+        }
+        return writeJson(value, errorMessage);
     }
 
     private String defaultJson(String value) {
