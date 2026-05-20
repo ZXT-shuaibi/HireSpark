@@ -19,6 +19,8 @@ package com.nageoffer.ai.ragent.career.controller;
 
 import com.nageoffer.ai.ragent.career.controller.request.CareerInterviewAnswerRequest;
 import com.nageoffer.ai.ragent.career.controller.request.CareerInterviewCreateRequest;
+import com.nageoffer.ai.ragent.career.controller.request.CareerDemeanorAnalysisSubmitRequest;
+import com.nageoffer.ai.ragent.career.controller.request.CareerTextToSpeechPlanRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -57,6 +59,17 @@ class CareerInterviewControllerMappingTest {
         assertArrayEquals(new String[]{"/career/interviews/{sessionId}/answers"},
                 CareerInterviewController.class
                         .getMethod("submitAnswer", String.class, CareerInterviewAnswerRequest.class)
+                        .getAnnotation(PostMapping.class)
+                        .value());
+        assertArrayEquals(new String[]{"/career/interviews/{sessionId}/tts/plan"},
+                CareerInterviewController.class
+                        .getMethod("planTextToSpeech", String.class, CareerTextToSpeechPlanRequest.class)
+                        .getAnnotation(PostMapping.class)
+                        .value());
+        assertArrayEquals(new String[]{"/career/interviews/{sessionId}/demeanor/analyze"},
+                CareerInterviewController.class
+                        .getMethod("analyzeDemeanor", String.class,
+                                CareerDemeanorAnalysisSubmitRequest.class)
                         .getAnnotation(PostMapping.class)
                         .value());
         assertArrayEquals(new String[]{"/career/interviews/{sessionId}/turns/{turnNo}/retry-evaluation"},

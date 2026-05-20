@@ -138,6 +138,18 @@ career:
     text-interview: true
     voice-interview: false
     demeanor-analysis: false
+  tts:
+    enabled: false
+    chunk-max-chars: 180
+    voice: default
+    cache-ttl-seconds: 3600
+  demeanor:
+    enabled: false
+    retention-policy: derived-summary-only
+    limitations:
+      - auxiliary-signal-only
+      - not-a-hiring-decision
+      - requires-user-consent
   render:
     font:
       enabled: true

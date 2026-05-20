@@ -19,13 +19,20 @@ package com.nageoffer.ai.ragent.career.controller;
 
 import com.nageoffer.ai.ragent.career.controller.request.CareerInterviewAnswerRequest;
 import com.nageoffer.ai.ragent.career.controller.request.CareerInterviewCreateRequest;
+import com.nageoffer.ai.ragent.career.controller.request.CareerDemeanorAnalysisSubmitRequest;
+import com.nageoffer.ai.ragent.career.controller.request.CareerTextToSpeechPlanRequest;
 import com.nageoffer.ai.ragent.career.controller.vo.CareerInterviewReportVO;
 import com.nageoffer.ai.ragent.career.controller.vo.CareerInterviewSessionVO;
 import com.nageoffer.ai.ragent.career.controller.vo.CareerInterviewTurnVO;
 import com.nageoffer.ai.ragent.career.service.InterviewReportService;
 import com.nageoffer.ai.ragent.career.service.InterviewSessionService;
+import com.nageoffer.ai.ragent.career.service.demeanor.CareerDemeanorAnalysisResult;
+import com.nageoffer.ai.ragent.career.service.demeanor.CareerDemeanorAnalysisService;
 import com.nageoffer.ai.ragent.career.service.progress.CareerProgressStreamService;
 import com.nageoffer.ai.ragent.career.service.recovery.InterviewSessionRecoveryService;
+import com.nageoffer.ai.ragent.career.service.tts.CareerTextToSpeechPlan;
+import com.nageoffer.ai.ragent.career.service.tts.CareerTextToSpeechRequest;
+import com.nageoffer.ai.ragent.career.service.tts.CareerTextToSpeechService;
 import com.nageoffer.ai.ragent.framework.convention.Result;
 import com.nageoffer.ai.ragent.framework.context.UserContext;
 import com.nageoffer.ai.ragent.framework.web.Results;
@@ -51,6 +58,10 @@ public class CareerInterviewController {
     private final InterviewSessionRecoveryService interviewSessionRecoveryService;
 
     private final CareerProgressStreamService careerProgressStreamService;
+
+    private final CareerTextToSpeechService careerTextToSpeechService;
+
+    private final CareerDemeanorAnalysisService careerDemeanorAnalysisService;
 
     @PostMapping("/career/interviews")
     @Operation(summary = "创建面试会话", description = "基于简历版本和可选 JD 创建文字模拟面试会话")
@@ -86,6 +97,33 @@ public class CareerInterviewController {
     public Result<CareerInterviewTurnVO> submitAnswer(@PathVariable String sessionId,
                                                       @RequestBody CareerInterviewAnswerRequest request) {
         return Results.success(interviewSessionService.submitAnswer(sessionId, request));
+    }
+
+    @PostMapping("/career/interviews/{sessionId}/tts/plan")
+    @Operation(summary = "规划面试文本 TTS", description = "为问题、追问或反馈生成可降级的 TTS 切片、缓存 key 和取消 key")
+    public Result<CareerTextToSpeechPlan> planTextToSpeech(@PathVariable String sessionId,
+                                                           @RequestBody CareerTextToSpeechPlanRequest request) {
+        interviewSessionService.querySession(sessionId);
+        return Results.success(careerTextToSpeechService.plan(CareerTextToSpeechRequest.of(
+                sessionId,
+                request == null ? null : request.getTurnId(),
+                request == null ? null : request.getText()
+        )));
+    }
+
+    @PostMapping("/career/interviews/{sessionId}/demeanor/analyze")
+    @Operation(summary = "分析面试神态辅助信号", description = "在用户授权后归一化神态/表情辅助信号；结果不进入唯一评分依据")
+    public Result<CareerDemeanorAnalysisResult> analyzeDemeanor(
+            @PathVariable String sessionId,
+            @RequestBody CareerDemeanorAnalysisSubmitRequest request) {
+        interviewSessionService.querySession(sessionId);
+        return Results.success(careerDemeanorAnalysisService.analyze(
+                new com.nageoffer.ai.ragent.career.service.demeanor.CareerDemeanorAnalysisRequest(
+                        sessionId,
+                        request != null && Boolean.TRUE.equals(request.getConsentGranted()),
+                        request == null ? null : request.getObservations()
+                )
+        ));
     }
 
     /**

@@ -64,6 +64,41 @@
       "name": "career.render.font.paths",
       "type": "java.util.List<java.lang.String>",
       "description": "Ordered classpath: or file: font resources used by openhtmltopdf."
+    },
+    {
+      "name": "career.tts.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether long-text TTS planning is enabled for interview questions, follow-ups, and feedback."
+    },
+    {
+      "name": "career.tts.chunk-max-chars",
+      "type": "java.lang.Integer",
+      "description": "Maximum characters per planned TTS chunk."
+    },
+    {
+      "name": "career.tts.voice",
+      "type": "java.lang.String",
+      "description": "Logical voice name used by downstream TTS playback integrations."
+    },
+    {
+      "name": "career.tts.cache-ttl-seconds",
+      "type": "java.lang.Integer",
+      "description": "TTL for cached TTS artifacts when an implementation stores audio chunks."
+    },
+    {
+      "name": "career.demeanor.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether optional demeanor and expression auxiliary analysis is enabled."
+    },
+    {
+      "name": "career.demeanor.retention-policy",
+      "type": "java.lang.String",
+      "description": "Retention policy for derived demeanor analysis summaries."
+    },
+    {
+      "name": "career.demeanor.limitations",
+      "type": "java.util.List<java.lang.String>",
+      "description": "Limitations shown with demeanor analysis, including consent and auxiliary-signal boundaries."
     }
   ]
 }
