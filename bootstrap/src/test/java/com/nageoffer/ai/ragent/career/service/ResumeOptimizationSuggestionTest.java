@@ -43,6 +43,7 @@ import com.nageoffer.ai.ragent.career.enums.OptimizationReviewStatus;
 import com.nageoffer.ai.ragent.career.enums.ResumeSuggestionStatus;
 import com.nageoffer.ai.ragent.career.service.impl.ResumeOptimizationServiceImpl;
 import com.nageoffer.ai.ragent.career.service.parser.CareerJsonParser;
+import com.nageoffer.ai.ragent.career.service.progress.CareerProgressStreamService;
 import com.nageoffer.ai.ragent.career.service.retrieval.CareerRetrievalEnhancement;
 import com.nageoffer.ai.ragent.career.service.retrieval.CareerRetrievalEnhancementService;
 import com.nageoffer.ai.ragent.career.service.retrieval.CareerRetrievalEvidence;
@@ -113,6 +114,9 @@ class ResumeOptimizationSuggestionTest {
 
     @Mock
     private CareerRetrievalEnhancementService careerRetrievalEnhancementService;
+
+    @Mock
+    private CareerProgressStreamService careerProgressStreamService;
 
     @BeforeAll
     static void initMyBatisPlusLambdaCache() {
@@ -234,9 +238,10 @@ class ResumeOptimizationSuggestionTest {
         assertEquals(ResumeSuggestionStatus.PENDING.name(), result.getSuggestions().get(0).getStatus());
 
         ArgumentCaptor<ResumeOptimizationTaskDO> taskUpdateCaptor = ArgumentCaptor.forClass(ResumeOptimizationTaskDO.class);
-        verify(taskMapper).updateById(taskUpdateCaptor.capture());
-        assertEquals(CareerTaskStatus.SUCCESS.name(), taskUpdateCaptor.getValue().getStatus());
-        assertNotNull(taskUpdateCaptor.getValue().getOutputJson());
+        verify(taskMapper, times(2)).updateById(taskUpdateCaptor.capture());
+        ResumeOptimizationTaskDO finalTask = taskUpdateCaptor.getAllValues().getLast();
+        assertEquals(CareerTaskStatus.SUCCESS.name(), finalTask.getStatus());
+        assertNotNull(finalTask.getOutputJson());
 
         ArgumentCaptor<ResumeOptimizationSuggestionDO> suggestionCaptor =
                 ArgumentCaptor.forClass(ResumeOptimizationSuggestionDO.class);
@@ -304,8 +309,8 @@ class ResumeOptimizationSuggestionTest {
 
         assertEquals("suggestion insert failed", ex.getMessage());
         verify(suggestionMapper).deleteById("suggestion-1");
-        verify(taskMapper, times(1)).updateById(any(ResumeOptimizationTaskDO.class));
-        assertEquals(List.of(CareerTaskStatus.FAILED.name()), taskUpdateStatuses);
+        verify(taskMapper, times(2)).updateById(any(ResumeOptimizationTaskDO.class));
+        assertEquals(CareerTaskStatus.FAILED.name(), taskUpdateStatuses.getLast());
     }
 
     @Test
@@ -417,7 +422,8 @@ class ResumeOptimizationSuggestionTest {
                 alignmentReportMapper,
                 careerJsonParser,
                 singleFlightLlmService,
-                careerRetrievalEnhancementService
+                careerRetrievalEnhancementService,
+                careerProgressStreamService
         );
     }
 

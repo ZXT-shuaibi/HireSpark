@@ -49,15 +49,18 @@ import com.nageoffer.ai.ragent.career.service.ResumeOptimizationService;
 import com.nageoffer.ai.ragent.career.service.ResumeOptimizationReviewEvaluator;
 import com.nageoffer.ai.ragent.career.service.parser.CareerJsonParser;
 import com.nageoffer.ai.ragent.career.service.prompt.CareerPromptTemplates;
+import com.nageoffer.ai.ragent.career.service.progress.CareerProgressStreamService;
 import com.nageoffer.ai.ragent.career.service.retrieval.CareerRetrievalEnhancement;
 import com.nageoffer.ai.ragent.career.service.retrieval.CareerRetrievalEnhancementService;
 import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightLlmService;
+import com.nageoffer.ai.ragent.framework.context.LoginUser;
 import com.nageoffer.ai.ragent.framework.context.UserContext;
 import com.nageoffer.ai.ragent.framework.convention.ChatMessage;
 import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
 import com.nageoffer.ai.ragent.framework.exception.ClientException;
 import com.nageoffer.ai.ragent.framework.exception.ServiceException;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -68,8 +71,10 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
 
 @Service
+@Slf4j
 @RequiredArgsConstructor
 public class ResumeOptimizationServiceImpl implements ResumeOptimizationService {
 
@@ -94,6 +99,7 @@ public class ResumeOptimizationServiceImpl implements ResumeOptimizationService 
     private final CareerJsonParser careerJsonParser;
     private final CareerSingleFlightLlmService singleFlightLlmService;
     private final CareerRetrievalEnhancementService careerRetrievalEnhancementService;
+    private final CareerProgressStreamService careerProgressStreamService;
     private final ResumeOptimizationReviewEvaluator reviewEvaluator = new ResumeOptimizationReviewEvaluator();
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -102,6 +108,32 @@ public class ResumeOptimizationServiceImpl implements ResumeOptimizationService 
      */
     @Override
     public CareerOptimizationTaskVO createTask(CareerOptimizationCreateRequest request) {
+        OptimizationTaskContext context = prepareTask(request);
+        return executeOptimizationTask(context);
+    }
+
+    /**
+     * 创建简历优化任务并异步执行，前端可立即订阅 SSE 进度。
+     */
+    @Override
+    public CareerOptimizationTaskVO createTaskAsync(CareerOptimizationCreateRequest request) {
+        LoginUser currentUser = UserContext.requireUser();
+        OptimizationTaskContext context = prepareTask(request);
+        CompletableFuture.runAsync(() -> {
+            UserContext.set(currentUser);
+            try {
+                executeOptimizationTaskSafely(context);
+            } finally {
+                UserContext.clear();
+            }
+        });
+        return toTaskVO(context.task(), Map.of(), List.of(), null, List.of());
+    }
+
+    /**
+     * 校验输入并创建 RUNNING 状态的优化任务。
+     */
+    private OptimizationTaskContext prepareTask(CareerOptimizationCreateRequest request) {
         String userId = requireUserId();
         if (request == null) {
             throw new ClientException("Optimization create request is required");
@@ -137,21 +169,31 @@ public class ResumeOptimizationServiceImpl implements ResumeOptimizationService 
         taskMapper.insert(task);
         String traceId = "career-opt-" + task.getId();
         task.setTraceId(traceId);
+        taskMapper.updateById(task);
+        return new OptimizationTaskContext(task, userId, resumeVersion, job, alignmentReport, traceId);
+    }
 
+    /**
+     * 执行完整的裁判-执行者优化闭环。
+     */
+    private CareerOptimizationTaskVO executeOptimizationTask(OptimizationTaskContext context) {
+        ResumeOptimizationTaskDO task = context.task();
+        String userId = context.userId();
         try {
             CareerRetrievalEnhancement retrievalEnhancement =
-                    careerRetrievalEnhancementService.enhanceOptimization(resumeVersion, job,
-                            alignmentReport == null ? "{}" : writeJson(buildAlignmentReportPayload(alignmentReport),
+                    careerRetrievalEnhancementService.enhanceOptimization(context.resumeVersion(), context.job(),
+                            context.alignmentReport() == null ? "{}" : writeJson(buildAlignmentReportPayload(context.alignmentReport()),
                                     "Failed to serialize alignment report JSON"));
             List<CareerProgressEventDO> progressEvents = new ArrayList<>();
             OptimizationIterationResult iterationResult = runOptimizationIterations(
-                    task, userId, resumeVersion, job, alignmentReport, retrievalEnhancement, progressEvents);
+                    task, userId, context.resumeVersion(), context.job(), context.alignmentReport(),
+                    retrievalEnhancement, progressEvents);
             ResumeOptimizationReviewDO review = iterationResult.review();
             CareerTaskStatus finalTaskStatus = toTaskStatus(review);
             CareerProgressEventDO finalEvent = persistProgressEvent(task.getId(), userId,
                     finalTaskStatus == CareerTaskStatus.SUCCESS ? "PASSED" : "NEEDS_REVIEW",
                     "Resume optimization review " + review.getStatus(),
-                    buildProgressPayload(review, traceId, iterationResult.iterationNo()));
+                    buildProgressPayload(review, context.traceId(), iterationResult.iterationNo()));
             progressEvents.add(finalEvent);
             task.setStatus(finalTaskStatus.name());
             task.setOutputJson(writeJson(buildTaskOutput(iterationResult.executorOutput(), review,
@@ -166,11 +208,22 @@ public class ResumeOptimizationServiceImpl implements ResumeOptimizationService 
             try {
                 markTaskFailed(task, userId, ex);
                 persistProgressEvent(task.getId(), userId, "FAILED",
-                        "Resume optimization failed: " + trimError(ex), Map.of("traceId", traceId));
+                        "Resume optimization failed: " + trimError(ex), Map.of("traceId", context.traceId()));
             } catch (RuntimeException updateEx) {
                 ex.addSuppressed(updateEx);
             }
             throw ex;
+        }
+    }
+
+    /**
+     * 后台执行优化任务，失败时只记录并推送失败事件，不再影响提交请求。
+     */
+    private void executeOptimizationTaskSafely(OptimizationTaskContext context) {
+        try {
+            executeOptimizationTask(context);
+        } catch (RuntimeException ex) {
+            log.warn("后台执行 Career 简历优化失败，taskId={}", context.task().getId(), ex);
         }
     }
 
@@ -663,7 +716,19 @@ public class ResumeOptimizationServiceImpl implements ResumeOptimizationService 
                         "Failed to serialize progress event payload JSON"))
                 .build();
         progressEventMapper.insert(event);
+        publishProgressEvent(event);
         return event;
+    }
+
+    /**
+     * 将已落库的进度事件推送给在线 SSE 客户端，推送失败不影响任务主链路。
+     */
+    private void publishProgressEvent(CareerProgressEventDO event) {
+        try {
+            careerProgressStreamService.publishOptimization(event);
+        } catch (RuntimeException ex) {
+            log.warn("推送 Career 优化进度失败，taskId={}，eventType={}", event.getTaskId(), event.getEventType(), ex);
+        }
     }
 
     private void markTaskFailed(ResumeOptimizationTaskDO task, String userId, RuntimeException ex) {
@@ -985,5 +1050,13 @@ public class ResumeOptimizationServiceImpl implements ResumeOptimizationService 
                                                 List<ResumeOptimizationSuggestionDO> suggestions,
                                                 ResumeOptimizationReviewDO review,
                                                 int iterationNo) {
+    }
+
+    private record OptimizationTaskContext(ResumeOptimizationTaskDO task,
+                                           String userId,
+                                           ResumeVersionDO resumeVersion,
+                                           JobDescriptionDO job,
+                                           JobAlignmentReportDO alignmentReport,
+                                           String traceId) {
     }
 }

@@ -41,6 +41,7 @@ import com.nageoffer.ai.ragent.career.enums.CareerTaskStatus;
 import com.nageoffer.ai.ragent.career.enums.OptimizationReviewStatus;
 import com.nageoffer.ai.ragent.career.service.impl.ResumeOptimizationServiceImpl;
 import com.nageoffer.ai.ragent.career.service.parser.CareerJsonParser;
+import com.nageoffer.ai.ragent.career.service.progress.CareerProgressStreamService;
 import com.nageoffer.ai.ragent.career.service.retrieval.CareerRetrievalEnhancement;
 import com.nageoffer.ai.ragent.career.service.retrieval.CareerRetrievalEnhancementService;
 import com.nageoffer.ai.ragent.career.service.retrieval.CareerRetrievalEvidence;
@@ -113,6 +114,9 @@ class ResumeOptimizationReviewTest {
 
     @Mock
     private CareerRetrievalEnhancementService careerRetrievalEnhancementService;
+
+    @Mock
+    private CareerProgressStreamService careerProgressStreamService;
 
     @BeforeAll
     static void initMyBatisPlusLambdaCache() {
@@ -202,12 +206,14 @@ class ResumeOptimizationReviewTest {
         assertEquals(0, result.getQualityScore().compareTo(java.math.BigDecimal.valueOf(0.82D)));
         assertEquals(List.of("GENERATING", "REVIEWING", "PASSED"), progressTypes(result));
         assertEquals("career-opt-task-1", result.getTraceId());
+        verify(careerProgressStreamService, times(3)).publishOptimization(any(CareerProgressEventDO.class));
 
         ArgumentCaptor<ResumeOptimizationTaskDO> taskCaptor =
                 ArgumentCaptor.forClass(ResumeOptimizationTaskDO.class);
-        verify(taskMapper).updateById(taskCaptor.capture());
-        assertEquals(CareerTaskStatus.SUCCESS.name(), taskCaptor.getValue().getStatus());
-        assertEquals("career-opt-task-1", taskCaptor.getValue().getTraceId());
+        verify(taskMapper, times(2)).updateById(taskCaptor.capture());
+        ResumeOptimizationTaskDO finalTask = taskCaptor.getAllValues().getLast();
+        assertEquals(CareerTaskStatus.SUCCESS.name(), finalTask.getStatus());
+        assertEquals("career-opt-task-1", finalTask.getTraceId());
 
         ArgumentCaptor<ResumeOptimizationReviewDO> reviewCaptor =
                 ArgumentCaptor.forClass(ResumeOptimizationReviewDO.class);
@@ -453,7 +459,8 @@ class ResumeOptimizationReviewTest {
                 alignmentReportMapper,
                 careerJsonParser,
                 singleFlightLlmService,
-                careerRetrievalEnhancementService
+                careerRetrievalEnhancementService,
+                careerProgressStreamService
         );
     }
 

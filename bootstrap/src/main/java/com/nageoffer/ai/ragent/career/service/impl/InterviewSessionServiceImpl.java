@@ -43,6 +43,7 @@ import com.nageoffer.ai.ragent.career.service.followup.InterviewFollowUpDecision
 import com.nageoffer.ai.ragent.career.service.parser.CareerJsonParser;
 import com.nageoffer.ai.ragent.career.service.recovery.InterviewSessionRecoveryService;
 import com.nageoffer.ai.ragent.career.service.prompt.CareerPromptTemplates;
+import com.nageoffer.ai.ragent.career.service.progress.CareerProgressStreamService;
 import com.nageoffer.ai.ragent.career.service.retrieval.CareerRetrievalEnhancement;
 import com.nageoffer.ai.ragent.career.service.retrieval.CareerRetrievalEnhancementService;
 import com.nageoffer.ai.ragent.career.service.runtime.InterviewTurnRuntimeService;
@@ -83,6 +84,7 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
     private final InterviewSessionRecoveryService interviewSessionRecoveryService;
     private final CareerRetrievalEnhancementService careerRetrievalEnhancementService;
     private final InterviewFollowUpDecisionService interviewFollowUpDecisionService;
+    private final CareerProgressStreamService careerProgressStreamService;
     private final PlatformTransactionManager transactionManager;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -122,6 +124,7 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
         interviewTurnRuntimeService.initializeAskedTurn(turn);
         turnMapper.insert(turn);
         interviewSessionRecoveryService.snapshotStableState(session, userId, null);
+        publishInterviewProgress(session.getId(), userId, "SESSION_CREATED", toSessionVO(session, plan, turn));
         return toSessionVO(session, plan, turn);
     }
 
@@ -131,6 +134,7 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
         InterviewSessionDO session = requireSession(sessionId, userId);
         ensureLinkedObjectsVisible(session, userId);
         InterviewTurnDO turn = currentAskedTurn(session, userId);
+        publishInterviewProgress(session.getId(), userId, "SESSION_QUERIED", toTurnVO(turn));
         return toSessionVO(session, readPlan(session.getPlanJson()), turn);
     }
 
@@ -153,6 +157,7 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
         if (turn == null) {
             throw new ClientException("Current interview question does not exist");
         }
+        publishInterviewProgress(session.getId(), userId, "NEXT_QUESTION", toTurnVO(turn));
         return toTurnVO(turn);
     }
 
@@ -202,7 +207,7 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
         InterviewFlowStateMachine.applySessionStatus(session, InterviewSessionStatus.RUNNING);
         session.setUpdatedBy(userId);
         sessionMapper.updateById(session);
-
+        publishInterviewProgress(session.getId(), userId, "ANSWER_SUBMITTED", toTurnVO(currentTurn));
         return evaluateSavedAnswerAndAdvance(session, currentTurn, userId, false);
     }
 
@@ -273,6 +278,7 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
         InterviewTurnDO turn = currentAskedTurn(session, userId);
         interviewSessionRecoveryService.snapshotStableState(session, userId,
                 turn == null ? null : turn.getStepIdempotencyKey());
+        publishInterviewProgress(session.getId(), userId, "SESSION_PAUSED", toSessionVO(session, readPlan(session.getPlanJson()), turn));
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -289,6 +295,7 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
         InterviewTurnDO turn = currentAskedTurn(session, userId);
         interviewSessionRecoveryService.snapshotStableState(session, userId,
                 turn == null ? null : turn.getStepIdempotencyKey());
+        publishInterviewProgress(session.getId(), userId, "SESSION_FINISHED", toSessionVO(session, readPlan(session.getPlanJson()), turn));
     }
 
     private InterviewTurnDO createPlannedTurn(InterviewSessionDO session,
@@ -465,6 +472,17 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
         audit.put("turnNo", turn.getTurnNo());
         target.put("followUpDecision", audit);
         turn.setFeedbackJson(writeJson(target, "Failed to serialize interview feedback JSON"));
+    }
+
+    /**
+     * 向面试实时进度流发布当前会话状态，失败不影响主流程。
+     */
+    private void publishInterviewProgress(String sessionId, String userId, String eventType, Object payload) {
+        try {
+            careerProgressStreamService.publishInterview(sessionId, userId, eventType, payload);
+        } catch (RuntimeException ex) {
+            log.warn("推送面试进度失败，sessionId={}，eventType={}", sessionId, eventType, ex);
+        }
     }
 
     private EvaluationResult evaluateAnswer(InterviewSessionDO session,

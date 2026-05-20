@@ -23,7 +23,9 @@ import com.nageoffer.ai.ragent.career.controller.vo.CareerOptimizationSuggestion
 import com.nageoffer.ai.ragent.career.controller.vo.CareerOptimizationTaskVO;
 import com.nageoffer.ai.ragent.career.controller.vo.CareerResumeVersionVO;
 import com.nageoffer.ai.ragent.career.service.ResumeOptimizationService;
+import com.nageoffer.ai.ragent.career.service.progress.CareerProgressStreamService;
 import com.nageoffer.ai.ragent.framework.convention.Result;
+import com.nageoffer.ai.ragent.framework.context.UserContext;
 import com.nageoffer.ai.ragent.framework.web.Results;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -32,6 +34,7 @@ import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @RestController
 @RequiredArgsConstructor
@@ -39,14 +42,26 @@ public class CareerOptimizationController {
 
     private final ResumeOptimizationService resumeOptimizationService;
 
+    private final CareerProgressStreamService careerProgressStreamService;
+
     @PostMapping("/career/optimizations")
     public Result<CareerOptimizationTaskVO> createTask(@RequestBody CareerOptimizationCreateRequest request) {
-        return Results.success(resumeOptimizationService.createTask(request));
+        return Results.success(resumeOptimizationService.createTaskAsync(request));
     }
 
     @GetMapping("/career/optimizations/{taskId}")
     public Result<CareerOptimizationTaskVO> queryTask(@PathVariable String taskId) {
         return Results.success(resumeOptimizationService.queryTask(taskId));
+    }
+
+    /**
+     * 订阅简历优化任务的实时进度。
+     */
+    @GetMapping(value = "/career/optimizations/{taskId}/progress/stream", produces = "text/event-stream;charset=UTF-8")
+    public SseEmitter streamProgress(@PathVariable String taskId) {
+        String userId = UserContext.requireUser().getUserId();
+        resumeOptimizationService.queryTask(taskId);
+        return careerProgressStreamService.subscribeOptimization(taskId, userId);
     }
 
     @PutMapping("/career/optimizations/suggestions/{suggestionId}")

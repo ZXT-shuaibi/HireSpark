@@ -24,8 +24,10 @@ import com.nageoffer.ai.ragent.career.controller.vo.CareerInterviewSessionVO;
 import com.nageoffer.ai.ragent.career.controller.vo.CareerInterviewTurnVO;
 import com.nageoffer.ai.ragent.career.service.InterviewReportService;
 import com.nageoffer.ai.ragent.career.service.InterviewSessionService;
+import com.nageoffer.ai.ragent.career.service.progress.CareerProgressStreamService;
 import com.nageoffer.ai.ragent.career.service.recovery.InterviewSessionRecoveryService;
 import com.nageoffer.ai.ragent.framework.convention.Result;
+import com.nageoffer.ai.ragent.framework.context.UserContext;
 import com.nageoffer.ai.ragent.framework.web.Results;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -33,6 +35,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 @RestController
 @RequiredArgsConstructor
@@ -44,6 +47,8 @@ public class CareerInterviewController {
 
     private final InterviewSessionRecoveryService interviewSessionRecoveryService;
 
+    private final CareerProgressStreamService careerProgressStreamService;
+
     @PostMapping("/career/interviews")
     public Result<CareerInterviewSessionVO> createSession(@RequestBody CareerInterviewCreateRequest request) {
         return Results.success(interviewSessionService.createSession(request));
@@ -52,6 +57,16 @@ public class CareerInterviewController {
     @GetMapping("/career/interviews/{sessionId}")
     public Result<CareerInterviewSessionVO> querySession(@PathVariable String sessionId) {
         return Results.success(interviewSessionService.querySession(sessionId));
+    }
+
+    /**
+     * 订阅面试会话的实时进度。
+     */
+    @GetMapping(value = "/career/interviews/{sessionId}/progress/stream", produces = "text/event-stream;charset=UTF-8")
+    public SseEmitter streamProgress(@PathVariable String sessionId) {
+        String userId = UserContext.requireUser().getUserId();
+        interviewSessionService.querySession(sessionId);
+        return careerProgressStreamService.subscribeInterview(sessionId, userId);
     }
 
     @GetMapping("/career/interviews/{sessionId}/next-question")

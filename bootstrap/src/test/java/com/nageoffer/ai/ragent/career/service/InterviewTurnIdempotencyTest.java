@@ -34,6 +34,7 @@ import com.nageoffer.ai.ragent.career.dao.mapper.ResumeVersionMapper;
 import com.nageoffer.ai.ragent.career.service.impl.InterviewSessionServiceImpl;
 import com.nageoffer.ai.ragent.career.service.followup.DefaultInterviewFollowUpDecisionService;
 import com.nageoffer.ai.ragent.career.service.parser.CareerJsonParser;
+import com.nageoffer.ai.ragent.career.service.progress.CareerProgressStreamService;
 import com.nageoffer.ai.ragent.career.service.recovery.InterviewSessionRecoveryService;
 import com.nageoffer.ai.ragent.career.service.runtime.InterviewTurnRuntimeServiceImpl;
 import com.nageoffer.ai.ragent.career.service.retrieval.CareerRetrievalEnhancement;
@@ -100,6 +101,9 @@ class InterviewTurnIdempotencyTest {
 
     @Mock
     private CareerRetrievalEnhancementService careerRetrievalEnhancementService;
+
+    @Mock
+    private CareerProgressStreamService careerProgressStreamService;
 
     @Mock
     private PlatformTransactionManager transactionManager;
@@ -183,6 +187,7 @@ class InterviewTurnIdempotencyTest {
                 interviewSessionRecoveryService,
                 careerRetrievalEnhancementService,
                 new DefaultInterviewFollowUpDecisionService(),
+                careerProgressStreamService,
                 transactionManager
         );
     }

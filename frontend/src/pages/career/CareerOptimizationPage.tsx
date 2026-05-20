@@ -11,10 +11,12 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import {
+  type CareerProgressEvent,
   type CareerOptimizationSuggestion,
   type CareerOptimizationTask,
   type CareerResumeVersion,
   createCareerOptimization,
+  createCareerOptimizationProgressStream,
   decideCareerOptimizationSuggestion,
   generateCareerOptimizationVersion,
   getCareerOptimization
@@ -45,7 +47,7 @@ export function CareerOptimizationPage() {
     setLoading(true);
     try {
       const result = await getCareerOptimization(id);
-      setTask(result);
+      setTask((prev) => mergeTaskProgress(prev, result));
       setTaskId(result.id || id);
       toast.success("Optimization task loaded.");
     } catch (error) {
@@ -67,7 +69,7 @@ export function CareerOptimizationPage() {
         jdId: createForm.jdId.trim() || undefined,
         alignmentReportId: createForm.alignmentReportId.trim() || undefined
       });
-      setTask(result);
+      setTask((prev) => mergeTaskProgress(prev, result));
       setTaskId(result.id);
       toast.success("Optimization task created.");
     } catch (error) {
@@ -111,6 +113,63 @@ export function CareerOptimizationPage() {
       setGenerating(false);
     }
   };
+
+  const refreshTaskSilently = React.useCallback(async (id: string) => {
+    try {
+      const result = await getCareerOptimization(id);
+      setTask((prev) => mergeTaskProgress(prev, result));
+      setTaskId(result.id || id);
+    } catch (error) {
+      console.warn("Career progress fallback reload failed", error);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    const id = task?.id;
+    if (!id || task.status !== "RUNNING") {
+      return;
+    }
+
+    let active = true;
+    const stream = createCareerOptimizationProgressStream(id, {
+      onProgress: (event) => {
+        if (!active) {
+          return;
+        }
+        setTask((prev) =>
+          prev && prev.id === id
+            ? {
+                ...prev,
+                progressEvents: mergeProgressEvents(prev.progressEvents, [event])
+              }
+            : prev
+        );
+      },
+      onDone: () => {
+        if (active) {
+          void refreshTaskSilently(id);
+        }
+      },
+      onError: (error) => {
+        if (active) {
+          console.warn("Career progress stream failed", error);
+          void refreshTaskSilently(id);
+        }
+      }
+    });
+
+    stream.start().catch((error) => {
+      if (active && (error as Error).name !== "AbortError") {
+        console.warn("Career progress stream closed", error);
+        void refreshTaskSilently(id);
+      }
+    });
+
+    return () => {
+      active = false;
+      stream.cancel();
+    };
+  }, [refreshTaskSilently, task?.id, task?.status]);
 
   const quality = task?.qualityScore == null ? "-" : String(task.qualityScore);
 
@@ -321,4 +380,41 @@ function TextBox({ label, value }: { label: string; value?: string | null }) {
 
 function EmptyState({ text }: { text: string }) {
   return <div className="rounded-lg border border-dashed bg-slate-50 p-6 text-center text-sm text-slate-500">{text}</div>;
+}
+
+function mergeTaskProgress(
+  previous: CareerOptimizationTask | null,
+  next: CareerOptimizationTask
+): CareerOptimizationTask {
+  if (!previous || previous.id !== next.id) {
+    return next;
+  }
+  return {
+    ...next,
+    progressEvents: mergeProgressEvents(previous.progressEvents, next.progressEvents)
+  };
+}
+
+function mergeProgressEvents(
+  current: CareerProgressEvent[] = [],
+  incoming: CareerProgressEvent[] = []
+): CareerProgressEvent[] {
+  const eventsByKey = new Map<string, CareerProgressEvent>();
+  [...current, ...incoming].forEach((event) => {
+    eventsByKey.set(progressEventKey(event), event);
+  });
+  return Array.from(eventsByKey.values()).sort(compareProgressEvents);
+}
+
+function progressEventKey(event: CareerProgressEvent) {
+  return event.id || [event.eventType, event.createTime, event.message, event.payloadJson].join("|");
+}
+
+function compareProgressEvents(left: CareerProgressEvent, right: CareerProgressEvent) {
+  const leftTime = left.createTime ? Date.parse(left.createTime) : 0;
+  const rightTime = right.createTime ? Date.parse(right.createTime) : 0;
+  if (leftTime !== rightTime) {
+    return leftTime - rightTime;
+  }
+  return progressEventKey(left).localeCompare(progressEventKey(right));
 }

@@ -1,4 +1,8 @@
 import { api } from "./api";
+import { createStreamResponse } from "@/hooks/useStreamResponse";
+import { storage } from "@/utils/storage";
+
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
 
 export type CareerRecord = Record<string, unknown>;
 
@@ -58,6 +62,13 @@ export interface CareerProgressEvent {
   message?: string | null;
   payloadJson?: string | null;
   createTime?: string | null;
+}
+
+export interface CareerProgressStreamHandlers {
+  onConnected?: (payload: unknown) => void;
+  onProgress?: (event: CareerProgressEvent) => void;
+  onDone?: (event?: CareerProgressEvent) => void;
+  onError?: (error: Error) => void;
 }
 
 export interface CareerOptimizationSuggestion {
@@ -264,6 +275,36 @@ export const getCareerOptimization = async (taskId: string): Promise<CareerOptim
   return api.get<CareerOptimizationTask, CareerOptimizationTask>(`/career/optimizations/${taskId}`);
 };
 
+export const createCareerOptimizationProgressStream = (
+  taskId: string,
+  handlers: CareerProgressStreamHandlers
+) => {
+  const token = storage.getToken();
+  return createStreamResponse(
+    {
+      url: `${API_BASE_URL.replace(/\/$/, "")}/career/optimizations/${encodeURIComponent(taskId)}/progress/stream`,
+      headers: token ? { Authorization: token } : undefined,
+      retryCount: 1
+    },
+    {
+      onEvent: (eventName, payload) => {
+        if (eventName === "connected") {
+          handlers.onConnected?.(payload);
+          return;
+        }
+        if (eventName === "progress" && isCareerProgressEvent(payload)) {
+          handlers.onProgress?.(payload);
+          return;
+        }
+        if (eventName === "done") {
+          handlers.onDone?.(isCareerProgressEvent(payload) ? payload : undefined);
+        }
+      },
+      onError: handlers.onError
+    }
+  );
+};
+
 export const decideCareerOptimizationSuggestion = async (
   suggestionId: string,
   status: string,
@@ -331,3 +372,10 @@ export const listCareerAdminTasks = async (params?: {
 export const listCareerAdminRubrics = async (): Promise<CareerAdminRubric[]> => {
   return api.get<CareerAdminRubric[], CareerAdminRubric[]>("/admin/career/rubrics");
 };
+
+function isCareerProgressEvent(payload: unknown): payload is CareerProgressEvent {
+  if (!payload || typeof payload !== "object") {
+    return false;
+  }
+  return "eventType" in payload || "message" in payload || "payloadJson" in payload;
+}

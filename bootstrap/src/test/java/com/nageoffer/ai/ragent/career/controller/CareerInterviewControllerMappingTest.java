@@ -39,6 +39,16 @@ class CareerInterviewControllerMappingTest {
                         .getMethod("querySession", String.class)
                         .getAnnotation(GetMapping.class)
                         .value());
+        assertArrayEquals(new String[]{"/career/interviews/{sessionId}/progress/stream"},
+                CareerInterviewController.class
+                        .getMethod("streamProgress", String.class)
+                        .getAnnotation(GetMapping.class)
+                        .value());
+        assertArrayEquals(new String[]{"text/event-stream;charset=UTF-8"},
+                CareerInterviewController.class
+                        .getMethod("streamProgress", String.class)
+                        .getAnnotation(GetMapping.class)
+                        .produces());
         assertArrayEquals(new String[]{"/career/interviews/{sessionId}/next-question"},
                 CareerInterviewController.class
                         .getMethod("nextQuestion", String.class)

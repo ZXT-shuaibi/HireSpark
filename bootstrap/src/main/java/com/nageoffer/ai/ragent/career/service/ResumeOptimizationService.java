@@ -27,6 +27,11 @@ public interface ResumeOptimizationService {
 
     CareerOptimizationTaskVO createTask(CareerOptimizationCreateRequest request);
 
+    /**
+     * 创建简历优化任务并交给后台执行，供前端通过 SSE 实时订阅进度。
+     */
+    CareerOptimizationTaskVO createTaskAsync(CareerOptimizationCreateRequest request);
+
     CareerOptimizationTaskVO queryTask(String taskId);
 
     CareerOptimizationSuggestionVO decideSuggestion(String suggestionId, CareerSuggestionDecisionRequest request);
