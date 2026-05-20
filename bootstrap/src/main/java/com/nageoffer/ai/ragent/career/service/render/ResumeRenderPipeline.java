@@ -1,20 +1,3 @@
-/*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package com.nageoffer.ai.ragent.career.service.render;
 
 import cn.hutool.core.util.StrUtil;
@@ -31,6 +14,7 @@ import org.commonmark.renderer.html.HtmlRenderer;
 import org.docx4j.convert.in.xhtml.XHTMLImporterImpl;
 import org.docx4j.openpackaging.packages.WordprocessingMLPackage;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.core.io.DefaultResourceLoader;
 import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
@@ -52,25 +36,38 @@ public class ResumeRenderPipeline {
     private static final String CONTENT_TYPE_HTML = "text/html";
     private static final String CONTENT_TYPE_PDF = "application/pdf";
     private static final String CONTENT_TYPE_DOCX = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+    private static final String RENDER_ENGINE_COMMONMARK = "commonmark";
+    private static final String RENDER_ENGINE_OPENHTMLTOPDF = "openhtmltopdf";
+    private static final String RENDER_ENGINE_DOCX4J = "docx4j";
 
     private final ObjectMapper objectMapper = new ObjectMapper();
     private final Parser markdownParser = Parser.builder().build();
     private final HtmlRenderer htmlRenderer = HtmlRenderer.builder().build();
     private final ResumeTemplateRenderer templateRenderer;
+    private final ResumeRenderFontRegistry fontRegistry;
 
     /**
      * 兼容不启动 Spring 容器的单元测试，使用默认模板渲染器。
      */
     public ResumeRenderPipeline() {
-        this(new ResumeTemplateRenderer());
+        this(new ResumeTemplateRenderer(), new ResumeRenderFontRegistry(
+                new ResumeRenderFontProperties(), new DefaultResourceLoader()));
     }
 
     /**
      * 注入简历模板渲染器，统一生成导出前的 Markdown。
      */
-    @Autowired
     public ResumeRenderPipeline(ResumeTemplateRenderer templateRenderer) {
-        this.templateRenderer = templateRenderer;
+        this(templateRenderer, new ResumeRenderFontRegistry(
+                new ResumeRenderFontProperties(), new DefaultResourceLoader()));
+    }
+
+    @Autowired
+    public ResumeRenderPipeline(ResumeTemplateRenderer templateRenderer, ResumeRenderFontRegistry fontRegistry) {
+        this.templateRenderer = templateRenderer == null ? new ResumeTemplateRenderer() : templateRenderer;
+        this.fontRegistry = fontRegistry == null
+                ? new ResumeRenderFontRegistry(new ResumeRenderFontProperties(), new DefaultResourceLoader())
+                : fontRegistry;
     }
 
     /**
@@ -97,6 +94,10 @@ public class ResumeRenderPipeline {
                 .traceId(traceId)
                 .rendererEnabled(supported)
                 .disabledReason(supported ? null : "Export type is not supported: " + type)
+                .renderEngine(renderEngine(type))
+                .fontFamily(fontRegistry.cssFontFamily())
+                .pdfFontFamily(fontRegistry.pdfFontFamily())
+                .fontResourceLocations(fontRegistry.fontResourceLocations())
                 .build();
     }
 
@@ -141,10 +142,19 @@ public class ResumeRenderPipeline {
     /**
      * 将 Markdown 正文转换为完整的 HTML/XHTML 页面。
      */
+    private String renderEngine(String type) {
+        return switch (type) {
+            case EXPORT_TYPE_MARKDOWN, EXPORT_TYPE_HTML -> RENDER_ENGINE_COMMONMARK;
+            case EXPORT_TYPE_PDF -> RENDER_ENGINE_OPENHTMLTOPDF;
+            case EXPORT_TYPE_WORD -> RENDER_ENGINE_DOCX4J;
+            default -> "";
+        };
+    }
+
     public String buildHtmlDocument(ResumeVersionDO version, String markdown) {
         Node document = markdownParser.parse(markdown);
         String body = htmlRenderer.render(document);
-        String title = escapeHtml(StrUtil.blankToDefault(version.getTitle(), "Resume"));
+        String title = escapeHtml(version == null ? "Resume" : StrUtil.blankToDefault(version.getTitle(), "Resume"));
         return """
                 <!DOCTYPE html>
                 <html xmlns="http://www.w3.org/1999/xhtml">
@@ -152,7 +162,7 @@ public class ResumeRenderPipeline {
                     <meta charset="utf-8" />
                     <title>%s</title>
                     <style>
-                        body { font-family: Arial, 'Noto Sans CJK SC', sans-serif; line-height: 1.6; color: #222; margin: 36px; }
+                        body { font-family: %s; line-height: 1.6; color: #222; margin: 36px; }
                         h1, h2, h3 { color: #111; margin-bottom: 0.35em; }
                         p { margin: 0 0 0.85em; }
                         ul, ol { margin-top: 0; }
@@ -162,7 +172,7 @@ public class ResumeRenderPipeline {
                 %s
                 </body>
                 </html>
-                """.formatted(title, body);
+                """.formatted(title, fontRegistry.cssFontFamily(), body);
     }
 
     /**
@@ -172,6 +182,7 @@ public class ResumeRenderPipeline {
         try (ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
             PdfRendererBuilder builder = new PdfRendererBuilder();
             builder.useFastMode();
+            fontRegistry.registerPdfFonts(builder);
             builder.withHtmlContent(html, null);
             builder.toStream(outputStream);
             builder.run();

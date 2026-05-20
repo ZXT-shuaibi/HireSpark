@@ -1,20 +1,3 @@
-/*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package com.nageoffer.ai.ragent.career.service;
 
 import com.nageoffer.ai.ragent.career.dao.entity.ResumeVersionDO;
@@ -24,6 +7,8 @@ import com.nageoffer.ai.ragent.career.service.render.ResumeRenderValidationResul
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 
@@ -93,6 +78,25 @@ class ResumeRenderPipelineTest {
         assertNotEquals("WORD renderer is not enabled", word.disabledReason());
     }
 
+    @Test
+    void validationPayloadIncludesRenderEngineAndFontStrategy() {
+        ResumeRenderValidationResult result = pipeline.validate(resumeVersionWithMarkdown(), "PDF");
+
+        Map<String, Object> payload = result.toPayload();
+
+        assertEquals("openhtmltopdf", payload.get("renderEngine"));
+        assertTrue(payload.get("fontFamily").toString().contains("Noto Sans SC"));
+        assertTrue(((List<?>) payload.get("fontResourceLocations")).contains("classpath:/fonts/NotoSansSC-Regular.ttf"));
+    }
+
+    @Test
+    void htmlRenderFallsBackToResumeTitleWhenVersionIsNull() {
+        String html = pipeline.buildHtmlDocument(null, "# 张三\n\nJava 工程师");
+
+        org.assertj.core.api.Assertions.assertThat(html)
+                .contains("<title>Resume</title>", "<h1>张三</h1>");
+    }
+
     /**
      * 校验 HTML 渲染会把 Markdown 标题和段落转换成页面元素。
      */
@@ -106,6 +110,15 @@ class ResumeRenderPipelineTest {
                 .doesNotContain("<p>Java engineer</p>");
         assertEquals("resume-version-1.html", output.fileName());
         assertEquals("text/html", output.contentType());
+    }
+
+    @Test
+    void htmlRenderUsesGovernedChineseFontStack() {
+        String html = pipeline.buildHtmlDocument(resumeVersionWithMarkdown(), "# 张三\n\nJava 工程师");
+
+        org.assertj.core.api.Assertions.assertThat(html)
+                .contains("font-family")
+                .contains("'Noto Sans SC'", "'Noto Sans CJK SC'", "'Microsoft YaHei'", "'SimSun'", "sans-serif");
     }
 
     /**
