@@ -1,6 +1,6 @@
 import * as React from "react";
 import { Link } from "react-router-dom";
-import { LifeBuoy, MessageSquarePlus, Send, Sparkles } from "lucide-react";
+import { LifeBuoy, Mic, MicOff, MessageSquarePlus, Radio, Send, Sparkles } from "lucide-react";
 import { toast } from "sonner";
 
 import { MainLayout } from "@/components/layout/MainLayout";
@@ -13,6 +13,9 @@ import { Textarea } from "@/components/ui/textarea";
 import {
   type CareerInterviewSession,
   type CareerInterviewTurn,
+  type CareerProgressEvent,
+  createCareerInterviewProgressStream,
+  createCareerInterviewTranscriptionUrl,
   createCareerInterview,
   getCareerInterview,
   getCareerInterviewNextQuestion,
@@ -32,6 +35,16 @@ export function CareerInterviewPage() {
   const [loading, setLoading] = React.useState(false);
   const [creating, setCreating] = React.useState(false);
   const [submitting, setSubmitting] = React.useState(false);
+  const [streamConnected, setStreamConnected] = React.useState(false);
+  const [lastProgress, setLastProgress] = React.useState<CareerProgressEvent | null>(null);
+  const [recording, setRecording] = React.useState(false);
+  const [asrStatus, setAsrStatus] = React.useState("idle");
+  const [answerSource, setAnswerSource] = React.useState<"TEXT" | "ASR">("TEXT");
+  const [answerSourceMeta, setAnswerSourceMeta] = React.useState<Record<string, unknown> | null>(null);
+  const recorderRef = React.useRef<MediaRecorder | null>(null);
+  const audioStreamRef = React.useRef<MediaStream | null>(null);
+  const transcriptionSocketRef = React.useRef<WebSocket | null>(null);
+  const recordingStartedAtRef = React.useRef<number | null>(null);
 
   const currentTurn = turn || session?.currentQuestion || null;
 
@@ -41,6 +54,79 @@ export function CareerInterviewPage() {
       setTurnNo(String(nextTurnNo));
     }
   }, [currentTurn?.turnNo, turnNo]);
+
+  const applyInterviewProgress = React.useCallback((event: CareerProgressEvent) => {
+    setLastProgress(event);
+    const payload = event.payload;
+    if (isInterviewSessionPayload(payload)) {
+      setSession(payload);
+      setTurn(payload.currentQuestion || null);
+      setSessionId(payload.id);
+      return;
+    }
+    if (isInterviewTurnPayload(payload)) {
+      setTurn(payload);
+      if (payload.turnNo != null) {
+        setTurnNo(String(payload.turnNo));
+      }
+    }
+  }, []);
+
+  const refreshSessionSilently = React.useCallback(async (id: string) => {
+    try {
+      const result = await getCareerInterview(id);
+      setSession(result);
+      setTurn(result.currentQuestion || null);
+      setSessionId(result.id || id);
+    } catch (error) {
+      console.warn("Career interview progress fallback reload failed", error);
+    }
+  }, []);
+
+  React.useEffect(() => {
+    const id = session?.id;
+    if (!id || session?.status === "COMPLETED" || session?.status === "CANCELLED") {
+      return;
+    }
+    let active = true;
+    const stream = createCareerInterviewProgressStream(id, {
+      onConnected: () => {
+        if (active) {
+          setStreamConnected(true);
+        }
+      },
+      onProgress: (event) => {
+        if (active) {
+          applyInterviewProgress(event);
+        }
+      },
+      onDone: () => {
+        if (active) {
+          setStreamConnected(false);
+          void refreshSessionSilently(id);
+        }
+      },
+      onError: (error) => {
+        if (active) {
+          setStreamConnected(false);
+          console.warn("Career interview progress stream failed", error);
+        }
+      }
+    });
+
+    stream.start().catch((error) => {
+      if (active && (error as Error).name !== "AbortError") {
+        setStreamConnected(false);
+        console.warn("Career interview progress stream closed", error);
+      }
+    });
+
+    return () => {
+      active = false;
+      setStreamConnected(false);
+      stream.cancel();
+    };
+  }, [applyInterviewProgress, refreshSessionSilently, session?.id, session?.status]);
 
   const loadSession = async (nextSessionId = sessionId) => {
     const id = nextSessionId.trim();
@@ -54,6 +140,9 @@ export function CareerInterviewPage() {
       setSession(result);
       setTurn(result.currentQuestion || null);
       setSessionId(result.id || id);
+      setAnswer(result.currentQuestion?.answer || "");
+      setAnswerSource(result.currentQuestion?.answerSource === "ASR" ? "ASR" : "TEXT");
+      setAnswerSourceMeta(result.currentQuestion?.answerSourceMeta || null);
       toast.success("Interview session loaded.");
     } catch (error) {
       toast.error(getErrorMessage(error, "Failed to load interview session."));
@@ -73,6 +162,9 @@ export function CareerInterviewPage() {
       setSession(result);
       setTurn(result.currentQuestion || null);
       setSessionId(result.id);
+      setAnswer("");
+      setAnswerSource("TEXT");
+      setAnswerSourceMeta(null);
       toast.success("Interview session created.");
     } catch (error) {
       toast.error(getErrorMessage(error, "Failed to create interview."));
@@ -93,6 +185,8 @@ export function CareerInterviewPage() {
       setTurn(result);
       setTurnNo(result.turnNo == null ? "" : String(result.turnNo));
       setAnswer(result.answer || "");
+      setAnswerSource("TEXT");
+      setAnswerSourceMeta(null);
       toast.success("Question loaded.");
     } catch (error) {
       toast.error(getErrorMessage(error, "Failed to load question."));
@@ -100,6 +194,164 @@ export function CareerInterviewPage() {
       setLoading(false);
     }
   };
+
+  const releaseAudioStream = React.useCallback(() => {
+    audioStreamRef.current?.getTracks().forEach((track) => track.stop());
+    audioStreamRef.current = null;
+  }, []);
+
+  const closeTranscriptionSocket = React.useCallback(() => {
+    const socket = transcriptionSocketRef.current;
+    transcriptionSocketRef.current = null;
+    if (socket && (socket.readyState === WebSocket.OPEN || socket.readyState === WebSocket.CONNECTING)) {
+      socket.close();
+    }
+  }, []);
+
+  const startMediaRecorder = React.useCallback((socket: WebSocket) => {
+    const stream = audioStreamRef.current;
+    if (!stream) {
+      toast.error("Microphone stream is unavailable.");
+      return;
+    }
+    const recorder = new MediaRecorder(stream);
+    recorderRef.current = recorder;
+    recordingStartedAtRef.current = Date.now();
+    recorder.ondataavailable = (event) => {
+      if (!event.data || event.data.size === 0 || socket.readyState !== WebSocket.OPEN) {
+        return;
+      }
+      event.data.arrayBuffer()
+        .then((buffer) => {
+          if (socket.readyState === WebSocket.OPEN) {
+            socket.send(buffer);
+          }
+        })
+        .catch((error) => console.warn("Audio chunk send failed", error));
+    };
+    recorder.onstop = () => {
+      releaseAudioStream();
+    };
+    recorder.start(300);
+    setRecording(true);
+    setAsrStatus("recording");
+  }, [releaseAudioStream]);
+
+  const applyTranscriptionDraft = React.useCallback((message: TranscriptionMessage) => {
+    const update = extractTranscriptionUpdate(message);
+    const text = readString(update.displayText) || readString(update.fullText) || readString(update.data);
+    if (!text) {
+      return;
+    }
+    const revision = update.revision ?? message.revision ?? Date.now();
+    const durationMs = recordingStartedAtRef.current == null ? undefined : Date.now() - recordingStartedAtRef.current;
+    setAnswer(text);
+    setAnswerRevision(`asr-${revision}`);
+    setAnswerSource("ASR");
+    setAnswerSourceMeta({
+      revision,
+      resultStatus: update.resultStatus ?? message.resultStatus ?? message.type,
+      segmentId: update.segmentId ?? message.segmentId,
+      sentenceSeq: update.sentenceSeq ?? message.sentenceSeq,
+      pgs: update.pgs ?? message.pgs,
+      rg: update.rg ?? message.rg,
+      bg: update.bg ?? message.bg,
+      ed: update.ed ?? message.ed,
+      isFinalPacket: update.isFinalPacket ?? message.isFinalPacket ?? message.type === "final",
+      durationMs,
+      mimeType: recorderRef.current?.mimeType || "audio/webm"
+    });
+  }, []);
+
+  const handleTranscriptionMessage = React.useCallback((event: MessageEvent<string>) => {
+    let message: TranscriptionMessage;
+    try {
+      message = JSON.parse(event.data) as TranscriptionMessage;
+    } catch {
+      return;
+    }
+    if (message.type === "transcription_started") {
+      const socket = transcriptionSocketRef.current;
+      if (socket) {
+        startMediaRecorder(socket);
+      }
+      return;
+    }
+    if (message.type === "transcription" || message.type === "final" || message.type === "transcription_stopped") {
+      applyTranscriptionDraft(message);
+      setAsrStatus(message.type === "final" ? "final" : "draft");
+      return;
+    }
+    if (message.type === "error") {
+      setAsrStatus("error");
+      toast.error(readString(message.message) || "Transcription failed.");
+      recorderRef.current?.stop();
+      recorderRef.current = null;
+      releaseAudioStream();
+    }
+  }, [applyTranscriptionDraft, releaseAudioStream, startMediaRecorder]);
+
+  const handleStartRecording = async () => {
+    const id = sessionId.trim();
+    if (!id) {
+      toast.error("Load or create an interview session first.");
+      return;
+    }
+    if (!window.MediaRecorder || !navigator.mediaDevices?.getUserMedia) {
+      toast.error("Current browser does not support recording.");
+      return;
+    }
+    try {
+      closeTranscriptionSocket();
+      releaseAudioStream();
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      audioStreamRef.current = stream;
+      const socket = new WebSocket(createCareerInterviewTranscriptionUrl(id));
+      transcriptionSocketRef.current = socket;
+      setAsrStatus("connecting");
+      socket.onopen = () => {
+        socket.send(JSON.stringify({ type: "start_transcription" }));
+      };
+      socket.onmessage = (event) => handleTranscriptionMessage(event as MessageEvent<string>);
+      socket.onerror = () => {
+        setAsrStatus("error");
+        toast.error("Transcription channel failed.");
+        releaseAudioStream();
+      };
+      socket.onclose = () => {
+        if (transcriptionSocketRef.current === socket) {
+          transcriptionSocketRef.current = null;
+        }
+        setRecording(false);
+        if (asrStatus === "recording") {
+          setAsrStatus("closed");
+        }
+      };
+    } catch (error) {
+      releaseAudioStream();
+      toast.error(getErrorMessage(error, "Failed to start recording."));
+    }
+  };
+
+  const handleStopRecording = () => {
+    recorderRef.current?.stop();
+    recorderRef.current = null;
+    setRecording(false);
+    setAsrStatus("stopping");
+    const socket = transcriptionSocketRef.current;
+    if (socket && socket.readyState === WebSocket.OPEN) {
+      socket.send(JSON.stringify({ type: "stop_transcription" }));
+    }
+  };
+
+  React.useEffect(() => {
+    return () => {
+      recorderRef.current?.stop();
+      recorderRef.current = null;
+      releaseAudioStream();
+      closeTranscriptionSocket();
+    };
+  }, [closeTranscriptionSocket, releaseAudioStream]);
 
   const handleSubmitAnswer = async () => {
     const id = sessionId.trim();
@@ -116,7 +368,9 @@ export function CareerInterviewPage() {
       const result = await submitCareerInterviewAnswer(id, {
         turnNo: turnNo.trim() ? Number(turnNo) : currentTurn?.turnNo ?? undefined,
         answer: answer.trim(),
-        answerRevision: answerRevision.trim()
+        answerRevision: answerRevision.trim(),
+        answerSource,
+        answerSourceMeta: answerSource === "ASR" && answerSourceMeta ? answerSourceMeta : undefined
       });
       setTurn(result);
       toast.success("Answer submitted.");
@@ -210,10 +464,11 @@ export function CareerInterviewPage() {
             </Card>
 
             <div className="space-y-4">
-              <div className="grid gap-3 md:grid-cols-3">
+              <div className="grid gap-3 md:grid-cols-4">
                 <Metric label="sessionStatus" value={session?.status || "-"} />
                 <Metric label="currentTurnNo" value={session?.currentTurnNo ?? currentTurn?.turnNo ?? "-"} />
                 <Metric label="turnStatus" value={currentTurn?.status || "-"} />
+                <Metric label="progressStream" value={streamConnected ? "connected" : lastProgress?.eventType || "-"} />
               </div>
 
               <Card>
@@ -240,6 +495,23 @@ export function CareerInterviewPage() {
                       placeholder="answerRevision"
                     />
                   </div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-slate-50 p-3">
+                    <div className="flex items-center gap-2 text-sm text-slate-600">
+                      <Radio className="h-4 w-4" />
+                      <span>ASR {asrStatus}</span>
+                      {answerSource === "ASR" ? <Badge variant="secondary">ASR draft</Badge> : <Badge variant="outline">TEXT</Badge>}
+                    </div>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={handleStartRecording} disabled={recording || submitting}>
+                        <Mic className="h-4 w-4" />
+                        Start
+                      </Button>
+                      <Button variant="outline" size="sm" onClick={handleStopRecording} disabled={!recording}>
+                        <MicOff className="h-4 w-4" />
+                        Stop
+                      </Button>
+                    </div>
+                  </div>
                   <Textarea value={answer} onChange={(event) => setAnswer(event.target.value)} placeholder="Answer" rows={5} />
                   <Button onClick={handleSubmitAnswer} disabled={submitting}>
                     <Send className="h-4 w-4" />
@@ -256,7 +528,8 @@ export function CareerInterviewPage() {
               <CardDescription>Runtime fields from the AI-Meeting style turn state machine.</CardDescription>
             </CardHeader>
             <CardContent>
-              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-5">
+              <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-6">
+                <StatusTile label="answerSource" value={currentTurn?.answerSource || answerSource} />
                 <StatusTile label="stepIdempotencyKey" value={currentTurn?.stepIdempotencyKey} />
                 <StatusTile label="answerStatus" value={currentTurn?.answerStatus} />
                 <StatusTile label="evaluationStatus" value={currentTurn?.evaluationStatus} />
@@ -299,4 +572,41 @@ function StatusTile({ label, value }: { label: string; value?: string | null }) 
       <p className="mt-2 break-all text-sm font-medium text-slate-900">{value || "-"}</p>
     </div>
   );
+}
+
+type TranscriptionMessage = Record<string, unknown> & {
+  type?: string;
+  message?: string;
+  data?: unknown;
+  fullText?: unknown;
+  displayText?: unknown;
+  revision?: unknown;
+  resultStatus?: unknown;
+  segmentId?: unknown;
+  sentenceSeq?: unknown;
+  pgs?: unknown;
+  rg?: unknown;
+  bg?: unknown;
+  ed?: unknown;
+  isFinalPacket?: unknown;
+};
+
+function isInterviewSessionPayload(payload: unknown): payload is CareerInterviewSession {
+  return isRecord(payload) && typeof payload.id === "string" && ("currentQuestion" in payload || "currentTurnNo" in payload);
+}
+
+function isInterviewTurnPayload(payload: unknown): payload is CareerInterviewTurn {
+  return isRecord(payload) && ("turnNo" in payload || "question" in payload) && !("currentQuestion" in payload);
+}
+
+function extractTranscriptionUpdate(message: TranscriptionMessage): TranscriptionMessage {
+  return isRecord(message.data) ? (message.data as TranscriptionMessage) : message;
+}
+
+function readString(value: unknown): string {
+  return typeof value === "string" ? value : "";
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object";
 }

@@ -285,11 +285,7 @@ export function CareerOptimizationPage() {
                         <span className="text-xs text-slate-500">{event.createTime || "-"}</span>
                       </div>
                       <p className="mt-2 text-slate-700">{event.message || "-"}</p>
-                      {event.payloadJson ? (
-                        <pre className="mt-2 overflow-auto rounded-md bg-slate-950 p-3 text-xs text-slate-100">
-                          {event.payloadJson}
-                        </pre>
-                      ) : null}
+                      <ProgressPayloadView event={event} />
                     </div>
                   ))
                 )}
@@ -382,6 +378,27 @@ function EmptyState({ text }: { text: string }) {
   return <div className="rounded-lg border border-dashed bg-slate-50 p-6 text-center text-sm text-slate-500">{text}</div>;
 }
 
+function ProgressPayloadView({ event }: { event: CareerProgressEvent }) {
+  const payload = parseProgressPayload(event.payloadJson);
+  if (!payload) {
+    return null;
+  }
+  const entries = Object.entries(payload).filter(([, value]) => value !== null && value !== undefined && value !== "");
+  if (entries.length === 0) {
+    return null;
+  }
+  return (
+    <div className="mt-3 grid gap-2 rounded-md bg-slate-50 p-3 text-xs text-slate-700 md:grid-cols-2">
+      {entries.slice(0, 8).map(([key, value]) => (
+        <div key={key} className="min-w-0">
+          <span className="font-medium text-slate-500">{key}: </span>
+          <span className="break-words">{formatProgressValue(value)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function mergeTaskProgress(
   previous: CareerOptimizationTask | null,
   next: CareerOptimizationTask
@@ -417,4 +434,28 @@ function compareProgressEvents(left: CareerProgressEvent, right: CareerProgressE
     return leftTime - rightTime;
   }
   return progressEventKey(left).localeCompare(progressEventKey(right));
+}
+
+function parseProgressPayload(payloadJson?: string | null): Record<string, unknown> | null {
+  if (!payloadJson) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(payloadJson) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : { value: parsed };
+  } catch {
+    return { raw: payloadJson };
+  }
+}
+
+function formatProgressValue(value: unknown): string {
+  if (Array.isArray(value)) {
+    return value.map(formatProgressValue).join(", ");
+  }
+  if (value && typeof value === "object") {
+    return JSON.stringify(value);
+  }
+  return String(value);
 }

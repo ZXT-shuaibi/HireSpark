@@ -57,11 +57,14 @@ export interface CareerAlignmentReport {
 }
 
 export interface CareerProgressEvent {
-  id: string;
+  id?: string;
   eventType?: string | null;
   message?: string | null;
   payloadJson?: string | null;
   createTime?: string | null;
+  sessionId?: string | null;
+  userId?: string | null;
+  payload?: unknown;
 }
 
 export interface CareerProgressStreamHandlers {
@@ -103,6 +106,8 @@ export interface CareerInterviewTurn {
   turnType?: string | null;
   question?: string | null;
   answer?: string | null;
+  answerSource?: string | null;
+  answerSourceMeta?: CareerRecord | null;
   score?: number | null;
   feedback?: CareerRecord | null;
   status?: string | null;
@@ -181,6 +186,24 @@ export interface CareerAdminTask {
   latencyMs?: number | null;
 }
 
+export interface CareerAdminAgentTrace {
+  id: string;
+  agentType?: string | null;
+  scene?: string | null;
+  sessionId?: string | null;
+  userId?: string | null;
+  traceId?: string | null;
+  modelName?: string | null;
+  status?: string | null;
+  inputSummary?: string | null;
+  outputSummary?: string | null;
+  latencyMs?: number | string | null;
+  errorType?: string | null;
+  errorMessage?: string | null;
+  createTime?: string | null;
+  updateTime?: string | null;
+}
+
 export interface CareerAdminRubricDimension {
   id?: string | null;
   name?: string | null;
@@ -215,6 +238,8 @@ export interface SubmitCareerInterviewAnswerPayload {
   turnNo?: number;
   answer?: string;
   answerRevision?: string;
+  answerSource?: string;
+  answerSourceMeta?: CareerRecord;
 }
 
 export const uploadCareerResume = async (file: File): Promise<CareerResumeUpload> => {
@@ -345,6 +370,48 @@ export const submitCareerInterviewAnswer = async (
   return api.post<CareerInterviewTurn, CareerInterviewTurn>(`/career/interviews/${sessionId}/answers`, payload);
 };
 
+export const createCareerInterviewProgressStream = (
+  sessionId: string,
+  handlers: CareerProgressStreamHandlers
+) => {
+  const token = storage.getToken();
+  return createStreamResponse(
+    {
+      url: `${API_BASE_URL.replace(/\/$/, "")}/career/interviews/${encodeURIComponent(sessionId)}/progress/stream`,
+      headers: token ? { Authorization: token } : undefined,
+      retryCount: 1
+    },
+    {
+      onEvent: (eventName, payload) => {
+        if (eventName === "connected") {
+          handlers.onConnected?.(payload);
+          return;
+        }
+        if (eventName === "progress" && isCareerProgressEvent(payload)) {
+          handlers.onProgress?.(payload);
+          return;
+        }
+        if (eventName === "done") {
+          handlers.onDone?.(isCareerProgressEvent(payload) ? payload : undefined);
+        }
+      },
+      onError: handlers.onError
+    }
+  );
+};
+
+export const createCareerInterviewTranscriptionUrl = (sessionId: string): string => {
+  const apiBase = new URL(API_BASE_URL || "/", window.location.origin);
+  apiBase.protocol = apiBase.protocol === "https:" ? "wss:" : "ws:";
+  const basePath = apiBase.pathname.replace(/\/$/, "");
+  const token = storage.getToken();
+  const url = new URL(`${basePath}/career/interviews/${encodeURIComponent(sessionId)}/transcription/ws`, apiBase.origin);
+  if (token) {
+    url.searchParams.set("Authorization", token);
+  }
+  return url.toString();
+};
+
 export const recoverCareerInterview = async (sessionId: string): Promise<CareerInterviewSession> => {
   return api.post<CareerInterviewSession, CareerInterviewSession>(`/career/interviews/${sessionId}/recover`);
 };
@@ -371,6 +438,14 @@ export const listCareerAdminTasks = async (params?: {
 
 export const listCareerAdminRubrics = async (): Promise<CareerAdminRubric[]> => {
   return api.get<CareerAdminRubric[], CareerAdminRubric[]>("/admin/career/rubrics");
+};
+
+export const listCareerAdminAgentTraces = async (params?: {
+  limit?: number;
+  agentType?: string;
+  status?: string;
+}): Promise<CareerAdminAgentTrace[]> => {
+  return api.get<CareerAdminAgentTrace[], CareerAdminAgentTrace[]>("/admin/career/agent-traces", { params });
 };
 
 function isCareerProgressEvent(payload: unknown): payload is CareerProgressEvent {
