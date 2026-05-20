@@ -115,6 +115,18 @@ career:
     text-interview: true
     voice-interview: false
     demeanor-analysis: false
+  voice:
+    xunfei-ast:
+      enabled: false
+      app-id: ${XUNFEI_AST_APP_ID:}
+      api-key: ${XUNFEI_AST_API_KEY:}
+      api-secret: ${XUNFEI_AST_API_SECRET:}
+      ws-base-url: wss://office-api-ast-dx.iflyaisol.com/ast/communicate/v1
+      audio-encode: pcm_s16le
+      lang: autodialect
+      sample-rate: "16000"
+      chunk-size-bytes: 1280
+      send-interval-ms: 40
   websocket:
     allowed-origin-patterns:
       - http://localhost:*

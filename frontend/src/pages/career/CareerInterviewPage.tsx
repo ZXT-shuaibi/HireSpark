@@ -41,8 +41,10 @@ export function CareerInterviewPage() {
   const [asrStatus, setAsrStatus] = React.useState("idle");
   const [answerSource, setAnswerSource] = React.useState<"TEXT" | "ASR">("TEXT");
   const [answerSourceMeta, setAnswerSourceMeta] = React.useState<Record<string, unknown> | null>(null);
-  const recorderRef = React.useRef<MediaRecorder | null>(null);
   const audioStreamRef = React.useRef<MediaStream | null>(null);
+  const audioContextRef = React.useRef<AudioContext | null>(null);
+  const audioSourceRef = React.useRef<MediaStreamAudioSourceNode | null>(null);
+  const audioProcessorRef = React.useRef<ScriptProcessorNode | null>(null);
   const transcriptionSocketRef = React.useRef<WebSocket | null>(null);
   const recordingStartedAtRef = React.useRef<number | null>(null);
 
@@ -195,7 +197,16 @@ export function CareerInterviewPage() {
     }
   };
 
-  const releaseAudioStream = React.useCallback(() => {
+  const releaseAudioResources = React.useCallback(() => {
+    audioProcessorRef.current?.disconnect();
+    audioSourceRef.current?.disconnect();
+    const audioContext = audioContextRef.current;
+    audioProcessorRef.current = null;
+    audioSourceRef.current = null;
+    audioContextRef.current = null;
+    if (audioContext && audioContext.state !== "closed") {
+      void audioContext.close();
+    }
     audioStreamRef.current?.getTracks().forEach((track) => track.stop());
     audioStreamRef.current = null;
   }, []);
@@ -208,34 +219,39 @@ export function CareerInterviewPage() {
     }
   }, []);
 
-  const startMediaRecorder = React.useCallback((socket: WebSocket) => {
+  const startPcmStreaming = React.useCallback((socket: WebSocket) => {
     const stream = audioStreamRef.current;
     if (!stream) {
       toast.error("Microphone stream is unavailable.");
       return;
     }
-    const recorder = new MediaRecorder(stream);
-    recorderRef.current = recorder;
+    const AudioContextCtor = window.AudioContext || (window as AudioWindow).webkitAudioContext;
+    if (!AudioContextCtor) {
+      toast.error("Current browser does not support recording.");
+      return;
+    }
+    const audioContext = new AudioContextCtor();
+    const source = audioContext.createMediaStreamSource(stream);
+    const processor = audioContext.createScriptProcessor(4096, 1, 1);
     recordingStartedAtRef.current = Date.now();
-    recorder.ondataavailable = (event) => {
-      if (!event.data || event.data.size === 0 || socket.readyState !== WebSocket.OPEN) {
+    processor.onaudioprocess = (event) => {
+      if (socket.readyState !== WebSocket.OPEN) {
         return;
       }
-      event.data.arrayBuffer()
-        .then((buffer) => {
-          if (socket.readyState === WebSocket.OPEN) {
-            socket.send(buffer);
-          }
-        })
-        .catch((error) => console.warn("Audio chunk send failed", error));
+      const input = event.inputBuffer.getChannelData(0);
+      const pcm = downsampleToPcm16(input, audioContext.sampleRate, 16000);
+      if (pcm.byteLength > 0) {
+        socket.send(pcm);
+      }
     };
-    recorder.onstop = () => {
-      releaseAudioStream();
-    };
-    recorder.start(300);
+    source.connect(processor);
+    processor.connect(audioContext.destination);
+    audioContextRef.current = audioContext;
+    audioSourceRef.current = source;
+    audioProcessorRef.current = processor;
     setRecording(true);
     setAsrStatus("recording");
-  }, [releaseAudioStream]);
+  }, []);
 
   const applyTranscriptionDraft = React.useCallback((message: TranscriptionMessage) => {
     const update = extractTranscriptionUpdate(message);
@@ -259,7 +275,7 @@ export function CareerInterviewPage() {
       ed: update.ed ?? message.ed,
       isFinalPacket: update.isFinalPacket ?? message.isFinalPacket ?? message.type === "final",
       durationMs,
-      mimeType: recorderRef.current?.mimeType || "audio/webm"
+      mimeType: "audio/pcm;rate=16000"
     });
   }, []);
 
@@ -273,7 +289,7 @@ export function CareerInterviewPage() {
     if (message.type === "transcription_started") {
       const socket = transcriptionSocketRef.current;
       if (socket) {
-        startMediaRecorder(socket);
+        startPcmStreaming(socket);
       }
       return;
     }
@@ -285,11 +301,9 @@ export function CareerInterviewPage() {
     if (message.type === "error") {
       setAsrStatus("error");
       toast.error(readString(message.message) || "Transcription failed.");
-      recorderRef.current?.stop();
-      recorderRef.current = null;
-      releaseAudioStream();
+      releaseAudioResources();
     }
-  }, [applyTranscriptionDraft, releaseAudioStream, startMediaRecorder]);
+  }, [applyTranscriptionDraft, releaseAudioResources, startPcmStreaming]);
 
   const handleStartRecording = async () => {
     const id = sessionId.trim();
@@ -297,13 +311,13 @@ export function CareerInterviewPage() {
       toast.error("Load or create an interview session first.");
       return;
     }
-    if (!window.MediaRecorder || !navigator.mediaDevices?.getUserMedia) {
+    if (!(window.AudioContext || (window as AudioWindow).webkitAudioContext) || !navigator.mediaDevices?.getUserMedia) {
       toast.error("Current browser does not support recording.");
       return;
     }
     try {
       closeTranscriptionSocket();
-      releaseAudioStream();
+      releaseAudioResources();
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       audioStreamRef.current = stream;
       const socket = new WebSocket(createCareerInterviewTranscriptionUrl(id));
@@ -316,7 +330,7 @@ export function CareerInterviewPage() {
       socket.onerror = () => {
         setAsrStatus("error");
         toast.error("Transcription channel failed.");
-        releaseAudioStream();
+        releaseAudioResources();
       };
       socket.onclose = () => {
         if (transcriptionSocketRef.current === socket) {
@@ -328,14 +342,13 @@ export function CareerInterviewPage() {
         }
       };
     } catch (error) {
-      releaseAudioStream();
+      releaseAudioResources();
       toast.error(getErrorMessage(error, "Failed to start recording."));
     }
   };
 
   const handleStopRecording = () => {
-    recorderRef.current?.stop();
-    recorderRef.current = null;
+    releaseAudioResources();
     setRecording(false);
     setAsrStatus("stopping");
     const socket = transcriptionSocketRef.current;
@@ -346,12 +359,10 @@ export function CareerInterviewPage() {
 
   React.useEffect(() => {
     return () => {
-      recorderRef.current?.stop();
-      recorderRef.current = null;
-      releaseAudioStream();
+      releaseAudioResources();
       closeTranscriptionSocket();
     };
-  }, [closeTranscriptionSocket, releaseAudioStream]);
+  }, [closeTranscriptionSocket, releaseAudioResources]);
 
   const handleSubmitAnswer = async () => {
     const id = sessionId.trim();
@@ -591,6 +602,10 @@ type TranscriptionMessage = Record<string, unknown> & {
   isFinalPacket?: unknown;
 };
 
+type AudioWindow = Window & typeof globalThis & {
+  webkitAudioContext?: typeof AudioContext;
+};
+
 function isInterviewSessionPayload(payload: unknown): payload is CareerInterviewSession {
   return isRecord(payload) && typeof payload.id === "string" && ("currentQuestion" in payload || "currentTurnNo" in payload);
 }
@@ -609,4 +624,26 @@ function readString(value: unknown): string {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object";
+}
+
+function downsampleToPcm16(input: Float32Array, sourceRate: number, targetRate: number): ArrayBuffer {
+  if (!input.length || sourceRate <= 0 || targetRate <= 0) {
+    return new ArrayBuffer(0);
+  }
+  const ratio = sourceRate / targetRate;
+  const outputLength = Math.max(1, Math.floor(input.length / ratio));
+  const output = new Int16Array(outputLength);
+  for (let index = 0; index < outputLength; index += 1) {
+    const start = Math.floor(index * ratio);
+    const end = Math.min(input.length, Math.floor((index + 1) * ratio));
+    let sum = 0;
+    let count = 0;
+    for (let cursor = start; cursor < end; cursor += 1) {
+      sum += input[cursor];
+      count += 1;
+    }
+    const sample = Math.max(-1, Math.min(1, count === 0 ? input[start] || 0 : sum / count));
+    output[index] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
+  }
+  return output.buffer;
 }
