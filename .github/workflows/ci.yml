@@ -77,3 +77,4 @@ jobs:
           test -f bootstrap/src/test/java/com/nageoffer/ai/ragent/career/controller/CareerOpenApiContractTest.java
           grep -q "/v3/api-docs/career-user" resources/docker/ragent-dev-stack.README.md
           grep -q "/actuator/health/readiness" resources/docker/ragent-dev-stack.README.md
+          grep -q "fontStrategy" bootstrap/src/main/java/com/nageoffer/ai/ragent/career/service/render/ResumeRenderValidationResult.java
