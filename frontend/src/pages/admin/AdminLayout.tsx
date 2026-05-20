@@ -151,6 +151,11 @@ const menuGroups: MenuGroup[] = [
             path: "/admin/career/rubric",
             label: "Rubric",
             icon: ClipboardList
+          },
+          {
+            path: "/admin/career/agent-traces",
+            label: "Agent Traces",
+            icon: Workflow
           }
         ]
       },

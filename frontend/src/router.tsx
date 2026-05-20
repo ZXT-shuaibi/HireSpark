@@ -9,6 +9,7 @@ import { CareerOptimizationPage } from "@/pages/career/CareerOptimizationPage";
 import { CareerDashboardPage } from "@/pages/admin/career/CareerDashboardPage";
 import { CareerTasksPage } from "@/pages/admin/career/CareerTasksPage";
 import { CareerRubricPage } from "@/pages/admin/career/CareerRubricPage";
+import { CareerAgentTracesPage } from "@/pages/admin/career/CareerAgentTracesPage";
 import { AdminLayout } from "@/pages/admin/AdminLayout";
 import { DashboardPage } from "@/pages/admin/dashboard/DashboardPage";
 import { KnowledgeListPage } from "@/pages/admin/knowledge/KnowledgeListPage";
@@ -178,6 +179,10 @@ export const router = createBrowserRouter([
       {
         path: "career/rubric",
         element: <CareerRubricPage />
+      },
+      {
+        path: "career/agent-traces",
+        element: <CareerAgentTracesPage />
       },
       {
         path: "settings",
