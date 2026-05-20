@@ -1,20 +1,3 @@
-/*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package com.nageoffer.ai.ragent.career.service.recovery;
 
 import cn.hutool.core.util.StrUtil;
@@ -37,6 +20,7 @@ import com.nageoffer.ai.ragent.career.service.flow.InterviewFlowStateMachine;
 import com.nageoffer.ai.ragent.framework.context.UserContext;
 import com.nageoffer.ai.ragent.framework.exception.ClientException;
 import com.nageoffer.ai.ragent.framework.exception.ServiceException;
+import com.nageoffer.ai.ragent.rag.core.memory.ConversationMemoryService;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
@@ -70,6 +54,7 @@ public class InterviewSessionRecoveryServiceImpl implements InterviewSessionReco
     private final InterviewHotSnapshotRefreshCoordinator hotRefreshCoordinator;
     private final InterviewSnapshotMonotonicGuard monotonicGuard;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private ConversationMemoryService conversationMemoryService;
 
     public InterviewSessionRecoveryServiceImpl(InterviewSessionMapper sessionMapper,
                                                InterviewTurnMapper turnMapper,
@@ -99,6 +84,11 @@ public class InterviewSessionRecoveryServiceImpl implements InterviewSessionReco
         this.hotSnapshotService = hotSnapshotService;
         this.hotRefreshCoordinator = hotRefreshCoordinator;
         this.monotonicGuard = monotonicGuard == null ? new InterviewSnapshotMonotonicGuard() : monotonicGuard;
+    }
+
+    @Autowired(required = false)
+    public void setConversationMemoryService(ConversationMemoryService conversationMemoryService) {
+        this.conversationMemoryService = conversationMemoryService;
     }
 
     /**
@@ -177,6 +167,7 @@ public class InterviewSessionRecoveryServiceImpl implements InterviewSessionReco
         }
         session.setUpdatedBy(userId);
         sessionMapper.updateById(session);
+        scheduleRecoveryMemoryCompression(sessionId, userId);
 
         InterviewTurnDO currentTurn = turns.stream()
                 .filter(turn -> recoveredTurnNo.equals(turn.getTurnNo()))
@@ -189,6 +180,34 @@ public class InterviewSessionRecoveryServiceImpl implements InterviewSessionReco
                 .currentTurnNo(session.getCurrentTurnNo())
                 .currentQuestion(currentTurn == null ? null : toTurnVO(currentTurn))
                 .build();
+    }
+
+    private void triggerRecoveryMemoryCompression(String sessionId, String userId) {
+        if (conversationMemoryService == null) {
+            return;
+        }
+        try {
+            conversationMemoryService.compressOnRecoveryEvent(sessionId, userId);
+        } catch (RuntimeException ex) {
+            log.warn("面试恢复后触发会话记忆压缩失败，sessionId={}，原因={}", sessionId, ex.getMessage());
+        }
+    }
+
+    private void scheduleRecoveryMemoryCompression(String sessionId, String userId) {
+        if (conversationMemoryService == null) {
+            return;
+        }
+        if (TransactionSynchronizationManager.isSynchronizationActive()
+                && TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    triggerRecoveryMemoryCompression(sessionId, userId);
+                }
+            });
+            return;
+        }
+        triggerRecoveryMemoryCompression(sessionId, userId);
     }
 
     /**

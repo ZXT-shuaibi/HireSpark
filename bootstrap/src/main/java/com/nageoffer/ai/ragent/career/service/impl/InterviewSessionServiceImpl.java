@@ -1,20 +1,3 @@
-/*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package com.nageoffer.ai.ragent.career.service.impl;
 
 import cn.hutool.core.util.StrUtil;
@@ -54,12 +37,15 @@ import com.nageoffer.ai.ragent.framework.convention.ChatMessage;
 import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
 import com.nageoffer.ai.ragent.framework.exception.ClientException;
 import com.nageoffer.ai.ragent.framework.exception.ServiceException;
+import com.nageoffer.ai.ragent.rag.core.memory.ConversationMemoryService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.util.ArrayList;
@@ -94,6 +80,7 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
     private final PlatformTransactionManager transactionManager;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private InterviewPlanExecuteReflectService interviewPlanExecuteReflectService;
+    private ConversationMemoryService conversationMemoryService;
 
     /**
      * 注入面试 Plan-and-Execute 编排服务，缺省时保留原线性流程以兼容单测和降级。
@@ -101,6 +88,11 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
     @Autowired(required = false)
     public void setInterviewPlanExecuteReflectService(InterviewPlanExecuteReflectService interviewPlanExecuteReflectService) {
         this.interviewPlanExecuteReflectService = interviewPlanExecuteReflectService;
+    }
+
+    @Autowired(required = false)
+    public void setConversationMemoryService(ConversationMemoryService conversationMemoryService) {
+        this.conversationMemoryService = conversationMemoryService;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -423,8 +415,34 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
             session.setUpdatedBy(userId);
             sessionMapper.updateById(session);
             interviewSessionRecoveryService.snapshotStableState(session, userId, stepIdempotencyKey);
+            scheduleStageSwitchMemoryCompression(session.getId(), userId);
         };
         executePersistence(persistence, compensation);
+    }
+
+    private void scheduleStageSwitchMemoryCompression(String sessionId, String userId) {
+        if (conversationMemoryService == null) {
+            return;
+        }
+        if (TransactionSynchronizationManager.isSynchronizationActive()
+                && TransactionSynchronizationManager.isActualTransactionActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    triggerStageSwitchMemoryCompression(sessionId, userId);
+                }
+            });
+            return;
+        }
+        triggerStageSwitchMemoryCompression(sessionId, userId);
+    }
+
+    private void triggerStageSwitchMemoryCompression(String sessionId, String userId) {
+        try {
+            conversationMemoryService.compressOnStageSwitch(sessionId, userId);
+        } catch (RuntimeException ex) {
+            log.warn("面试阶段推进后触发会话记忆压缩失败，sessionId={}，原因={}", sessionId, ex.getMessage());
+        }
     }
 
     /**
