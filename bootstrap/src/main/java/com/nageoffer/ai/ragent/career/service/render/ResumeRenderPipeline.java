@@ -98,6 +98,7 @@ public class ResumeRenderPipeline {
                 .fontFamily(fontRegistry.cssFontFamily())
                 .pdfFontFamily(fontRegistry.pdfFontFamily())
                 .fontResourceLocations(fontRegistry.fontResourceLocations())
+                .fontStrategy(fontRegistry.fontStrategy())
                 .build();
     }
 

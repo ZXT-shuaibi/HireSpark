@@ -87,6 +87,12 @@ class ResumeRenderPipelineTest {
         assertEquals("openhtmltopdf", payload.get("renderEngine"));
         assertTrue(payload.get("fontFamily").toString().contains("Noto Sans SC"));
         assertTrue(((List<?>) payload.get("fontResourceLocations")).contains("classpath:/fonts/NotoSansSC-Regular.ttf"));
+        Map<?, ?> fontStrategy = (Map<?, ?>) payload.get("fontStrategy");
+        assertEquals("configured-cjk-font-stack", fontStrategy.get("policy"));
+        assertEquals("operator-provided-or-system-installed-fonts", fontStrategy.get("source"));
+        assertEquals("operator-must-provide-licensed-font-files", fontStrategy.get("license"));
+        assertEquals("classpath-or-file-resource-registration", fontStrategy.get("loading"));
+        assertEquals("controlled-fallback-or-fail-on-missing-fonts", fontStrategy.get("fallback"));
     }
 
     @Test

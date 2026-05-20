@@ -15,8 +15,10 @@ import java.io.File;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import java.util.stream.Collectors;
 
 @Slf4j
@@ -51,6 +53,19 @@ public class ResumeRenderFontRegistry {
 
     public List<String> fontResourceLocations() {
         return properties.effectiveFontPaths();
+    }
+
+    public Map<String, Object> fontStrategy() {
+        Map<String, Object> strategy = new LinkedHashMap<>();
+        strategy.put("policy", "configured-cjk-font-stack");
+        strategy.put("source", "operator-provided-or-system-installed-fonts");
+        strategy.put("license", "operator-must-provide-licensed-font-files");
+        strategy.put("loading", "classpath-or-file-resource-registration");
+        strategy.put("fallback", "controlled-fallback-or-fail-on-missing-fonts");
+        strategy.put("cssFamilies", properties.effectiveCssFamilies());
+        strategy.put("pdfFamily", properties.effectivePdfFamily());
+        strategy.put("resourceLocations", properties.effectiveFontPaths());
+        return strategy;
     }
 
     public FontRegistrationReport registerPdfFonts(PdfRendererBuilder builder) {

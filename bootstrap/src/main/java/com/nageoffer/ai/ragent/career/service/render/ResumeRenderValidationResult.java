@@ -18,7 +18,8 @@ public record ResumeRenderValidationResult(boolean valid,
                                            String renderEngine,
                                            String fontFamily,
                                            String pdfFontFamily,
-                                           List<String> fontResourceLocations) {
+                                           List<String> fontResourceLocations,
+                                           Map<String, Object> fontStrategy) {
 
     public Map<String, Object> toPayload() {
         Map<String, Object> payload = new LinkedHashMap<>();
@@ -34,6 +35,7 @@ public record ResumeRenderValidationResult(boolean valid,
         payload.put("fontFamily", fontFamily == null ? "" : fontFamily);
         payload.put("pdfFontFamily", pdfFontFamily == null ? "" : pdfFontFamily);
         payload.put("fontResourceLocations", fontResourceLocations == null ? List.of() : fontResourceLocations);
+        payload.put("fontStrategy", fontStrategy == null ? Map.of() : fontStrategy);
         return payload;
     }
 }

@@ -94,3 +94,11 @@ RAGENT_RENDER_FONT_PATH=/path/to/NotoSansCJK-Regular.ttc
 ```
 
 The `app` profile installs `fonts-noto-cjk` in the Maven container and points `RAGENT_RENDER_FONT_PATH` to the installed Noto CJK font. If no configured font exists, rendering falls back to system/renderer fonts unless `career.render.font.fail-on-missing-fonts=true`.
+
+Each resume export validation payload records the font strategy:
+
+- `policy`: `configured-cjk-font-stack`
+- `source`: operator-provided or system-installed font files
+- `license`: operators must provide licensed fonts for their deployment
+- `loading`: classpath or file resource registration
+- `fallback`: controlled fallback, or hard failure when `career.render.font.fail-on-missing-fonts=true`
