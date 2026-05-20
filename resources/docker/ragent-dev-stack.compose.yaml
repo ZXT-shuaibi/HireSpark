@@ -1,0 +1,258 @@
+name: ragent-dev-stack
+
+services:
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: ragent-postgres
+    environment:
+      POSTGRES_DB: ragent
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - ragent-postgres-data:/var/lib/postgresql/data
+      - ../database/schema_pg.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d ragent"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    container_name: ragent-redis
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "123456"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - ragent-redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "123456", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  rustfs:
+    image: rustfs/rustfs:1.0.0-alpha.72
+    container_name: ragent-rustfs
+    command:
+      - "--address"
+      - ":9000"
+      - "--console-enable"
+      - "--access-key"
+      - "rustfsadmin"
+      - "--secret-key"
+      - "rustfsadmin"
+      - "/data"
+    environment:
+      RUSTFS_ACCESS_KEY: rustfsadmin
+      RUSTFS_SECRET_KEY: rustfsadmin
+      RUSTFS_CONSOLE_ENABLE: "true"
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - ragent-rustfs-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:9000/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+    restart: unless-stopped
+
+  rmqnamesrv:
+    image: apache/rocketmq:5.2.0
+    container_name: ragent-rmqnamesrv
+    command: sh mqnamesrv
+    environment:
+      JAVA_OPT_EXT: "-Xms256m -Xmx400m"
+    ports:
+      - "9876:9876"
+    healthcheck:
+      test: ["CMD-SHELL", "grep -q 'The Name Server boot success' /home/rocketmq/logs/rocketmqlogs/namesrv.log || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  rmqbroker:
+    image: apache/rocketmq:5.2.0
+    container_name: ragent-rmqbroker
+    depends_on:
+      rmqnamesrv:
+        condition: service_healthy
+    environment:
+      NAMESRV_ADDR: rmqnamesrv:9876
+      JAVA_OPT_EXT: "-Xms512m -Xmx512m"
+    command:
+      - sh
+      - -c
+      - |
+        cat > /home/rocketmq/rocketmq-5.2.0/conf/broker.conf << EOF
+        brokerClusterName = DefaultCluster
+        brokerName = broker-a
+        brokerId = 0
+        deleteWhen = 04
+        fileReservedTime = 48
+        brokerRole = ASYNC_MASTER
+        flushDiskType = ASYNC_FLUSH
+        brokerIP1 = rmqbroker
+        timerMaxDelaySec = 31622400
+        EOF
+        sh mqbroker --enable-proxy -c /home/rocketmq/rocketmq-5.2.0/conf/broker.conf
+    ports:
+      - "10909:10909"
+      - "10911:10911"
+      - "10912:10912"
+      - "8080:8080"
+      - "8081:8081"
+    restart: unless-stopped
+
+  rocketmq-dashboard:
+    image: apacherocketmq/rocketmq-dashboard:2.1.0
+    container_name: ragent-rocketmq-dashboard
+    depends_on:
+      rmqbroker:
+        condition: service_started
+    environment:
+      JAVA_OPTS: >-
+        -Xms256m -Xmx512m
+        -XX:MaxMetaspaceSize=256m
+        -Drocketmq.config.enableDashBoardCollect=false
+        -Drocketmq.namesrv.addr=rmqnamesrv:9876
+        -Dserver.port=8082
+    ports:
+      - "8082:8082"
+    restart: unless-stopped
+
+  ragent-app:
+    image: maven:3.9.9-eclipse-temurin-17
+    container_name: ragent-app
+    profiles: ["app"]
+    working_dir: /workspace
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rmqnamesrv:
+        condition: service_healthy
+      rmqbroker:
+        condition: service_started
+      rustfs:
+        condition: service_healthy
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/ragent?client_encoding=UTF8
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
+      SPRING_DATA_REDIS_PASSWORD: 123456
+      ROCKETMQ_NAME_SERVER: rmqnamesrv:9876
+      RUSTFS_URL: http://rustfs:9000
+      RUSTFS_ACCESS_KEY_ID: rustfsadmin
+      RUSTFS_SECRET_ACCESS_KEY: rustfsadmin
+      MILVUS_URI: http://milvus-standalone:19530
+      RAGENT_RENDER_FONT_PATH: /usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
+    command: >
+      sh -c "apt-get update &&
+      apt-get install -y --no-install-recommends fonts-noto-cjk &&
+      rm -rf /var/lib/apt/lists/* &&
+      chmod +x mvnw &&
+      ./mvnw -pl bootstrap -am spring-boot:run"
+    ports:
+      - "9090:9090"
+    volumes:
+      - ../..:/workspace
+      - ragent-maven-cache:/root/.m2
+
+  ragent-frontend:
+    image: node:20-alpine
+    container_name: ragent-frontend
+    profiles: ["app"]
+    working_dir: /workspace/frontend
+    depends_on:
+      - ragent-app
+    environment:
+      VITE_API_BASE_URL: http://localhost:9090/api/ragent
+    command: sh -c "npm ci && npm run dev -- --host 0.0.0.0"
+    ports:
+      - "5173:5173"
+    volumes:
+      - ../..:/workspace
+      - ragent-node-cache:/workspace/frontend/node_modules
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.18
+    container_name: ragent-etcd
+    profiles: ["milvus"]
+    command: >
+      etcd
+      -advertise-client-urls=http://etcd:2379
+      -listen-client-urls http://0.0.0.0:2379
+      --data-dir /etcd
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+      ETCD_SNAPSHOT_COUNT: "50000"
+    volumes:
+      - ragent-etcd-data:/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  milvus-standalone:
+    image: milvusdb/milvus:v2.6.6
+    container_name: ragent-milvus-standalone
+    profiles: ["milvus"]
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: rustfs:9000
+      MINIO_ACCESS_KEY_ID: rustfsadmin
+      MINIO_SECRET_ACCESS_KEY: rustfsadmin
+    depends_on:
+      etcd:
+        condition: service_healthy
+      rustfs:
+        condition: service_healthy
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    volumes:
+      - ragent-milvus-data:/var/lib/milvus
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 3
+
+  attu:
+    image: zilliz/attu:v2.6.3
+    container_name: ragent-attu
+    profiles: ["milvus"]
+    environment:
+      MILVUS_URL: milvus-standalone:19530
+    depends_on:
+      milvus-standalone:
+        condition: service_healthy
+    ports:
+      - "8000:3000"
+
+volumes:
+  ragent-postgres-data:
+  ragent-redis-data:
+  ragent-rustfs-data:
+  ragent-maven-cache:
+  ragent-node-cache:
+  ragent-etcd-data:
+  ragent-milvus-data:

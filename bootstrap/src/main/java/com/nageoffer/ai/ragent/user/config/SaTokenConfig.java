@@ -1,20 +1,3 @@
-/*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package com.nageoffer.ai.ragent.user.config;
 
 import cn.dev33.satoken.interceptor.SaInterceptor;
@@ -36,6 +19,16 @@ import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 @Configuration
 @RequiredArgsConstructor
 public class SaTokenConfig implements WebMvcConfigurer {
+
+    private static final String[] PUBLIC_PATH_PATTERNS = {
+            "/auth/**",
+            "/error",
+            "/swagger-ui.html",
+            "/swagger-ui/**",
+            "/v3/api-docs/**",
+            "/v3/api-docs.yaml",
+            "/webjars/**"
+    };
 
     /**
      * 体验环境只读模式拦截器
@@ -75,20 +68,24 @@ public class SaTokenConfig implements WebMvcConfigurer {
                 // 拦截所有路径
                 .addPathPatterns("/**")
                 // 排除认证相关路径和错误页面
-                .excludePathPatterns("/auth/**", "/error");
+                .excludePathPatterns(publicPathPatterns());
 
         // 注册体验环境只读模式拦截器
         registry.addInterceptor(demoModeInterceptor)
                 // 拦截所有路径
                 .addPathPatterns("/**")
                 // 排除认证相关路径和错误页面
-                .excludePathPatterns("/auth/**", "/error");
+                .excludePathPatterns(publicPathPatterns());
 
         // 注册用户上下文拦截器
         registry.addInterceptor(userContextInterceptor)
                 // 拦截所有路径
                 .addPathPatterns("/**")
                 // 排除认证相关路径和错误页面
-                .excludePathPatterns("/auth/**", "/error");
+                .excludePathPatterns(publicPathPatterns());
+    }
+
+    public static String[] publicPathPatterns() {
+        return PUBLIC_PATH_PATTERNS.clone();
     }
 }
