@@ -151,6 +151,11 @@
       "description": "Whether optional demeanor and expression auxiliary analysis is enabled."
     },
     {
+      "name": "career.demeanor.provider",
+      "type": "java.lang.String",
+      "description": "Logical demeanor provider name. Use none for observation-only aggregation or xingchen for workflow analysis."
+    },
+    {
       "name": "career.demeanor.retention-policy",
       "type": "java.lang.String",
       "description": "Retention policy for derived demeanor analysis summaries."
@@ -159,6 +164,46 @@
       "name": "career.demeanor.limitations",
       "type": "java.util.List<java.lang.String>",
       "description": "Limitations shown with demeanor analysis, including consent and auxiliary-signal boundaries."
+    },
+    {
+      "name": "career.demeanor.xingchen.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether the Xunfei XingChen demeanor workflow provider is enabled."
+    },
+    {
+      "name": "career.demeanor.xingchen.api-key",
+      "type": "java.lang.String",
+      "description": "Xunfei XingChen workflow API key."
+    },
+    {
+      "name": "career.demeanor.xingchen.api-secret",
+      "type": "java.lang.String",
+      "description": "Xunfei XingChen workflow API secret."
+    },
+    {
+      "name": "career.demeanor.xingchen.flow-id",
+      "type": "java.lang.String",
+      "description": "Xunfei XingChen workflow id for demeanor and expression analysis."
+    },
+    {
+      "name": "career.demeanor.xingchen.chat-url",
+      "type": "java.lang.String",
+      "description": "Xunfei XingChen workflow chat completion endpoint."
+    },
+    {
+      "name": "career.demeanor.xingchen.upload-url",
+      "type": "java.lang.String",
+      "description": "Xunfei XingChen workflow file upload endpoint used for Base64 image input."
+    },
+    {
+      "name": "career.demeanor.xingchen.timeout-seconds",
+      "type": "java.lang.Integer",
+      "description": "Maximum seconds for XingChen demeanor workflow requests."
+    },
+    {
+      "name": "career.demeanor.xingchen.max-image-bytes",
+      "type": "java.lang.Integer",
+      "description": "Maximum decoded image size accepted for XingChen demeanor uploads."
     }
   ]
 }

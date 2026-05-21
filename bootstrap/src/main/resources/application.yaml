@@ -164,11 +164,21 @@ career:
       max-text-chars: 100000
   demeanor:
     enabled: false
+    provider: none
     retention-policy: derived-summary-only
     limitations:
       - auxiliary-signal-only
       - not-a-hiring-decision
       - requires-user-consent
+    xingchen:
+      enabled: false
+      api-key: ${XUNFEI_XINGCHEN_API_KEY:}
+      api-secret: ${XUNFEI_XINGCHEN_API_SECRET:}
+      flow-id: ${XUNFEI_XINGCHEN_DEMEANOR_FLOW_ID:}
+      chat-url: https://xingchen-api.xf-yun.com/workflow/v1/chat/completions
+      upload-url: https://xingchen-api.xf-yun.com/workflow/v1/upload_file
+      timeout-seconds: 60
+      max-image-bytes: 5242880
   render:
     font:
       enabled: true

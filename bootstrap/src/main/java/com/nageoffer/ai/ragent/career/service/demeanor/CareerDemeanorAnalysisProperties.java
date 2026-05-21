@@ -14,6 +14,8 @@ public class CareerDemeanorAnalysisProperties {
 
     private boolean enabled = false;
 
+    private String provider = "none";
+
     private String retentionPolicy = "derived-summary-only";
 
     private List<String> limitations = new ArrayList<>(List.of(
@@ -21,4 +23,26 @@ public class CareerDemeanorAnalysisProperties {
             "not-a-hiring-decision",
             "requires-user-consent"
     ));
+
+    private XingChen xingchen = new XingChen();
+
+    @Data
+    public static class XingChen {
+
+        private boolean enabled = false;
+
+        private String apiKey = "";
+
+        private String apiSecret = "";
+
+        private String flowId = "";
+
+        private String chatUrl = "https://xingchen-api.xf-yun.com/workflow/v1/chat/completions";
+
+        private String uploadUrl = "https://xingchen-api.xf-yun.com/workflow/v1/upload_file";
+
+        private int timeoutSeconds = 60;
+
+        private int maxImageBytes = 5 * 1024 * 1024;
+    }
 }

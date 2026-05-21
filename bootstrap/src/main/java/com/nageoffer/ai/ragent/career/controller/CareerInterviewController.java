@@ -121,7 +121,10 @@ public class CareerInterviewController {
                 new com.nageoffer.ai.ragent.career.service.demeanor.CareerDemeanorAnalysisRequest(
                         sessionId,
                         request != null && Boolean.TRUE.equals(request.getConsentGranted()),
-                        request == null ? null : request.getObservations()
+                        request == null ? null : request.getObservations(),
+                        request == null ? null : request.getImageUrl(),
+                        request == null ? null : request.getImageBase64(),
+                        request == null ? null : request.getSampledAt()
                 )
         ));
     }

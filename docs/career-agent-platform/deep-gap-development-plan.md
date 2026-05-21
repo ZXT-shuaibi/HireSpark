@@ -83,11 +83,11 @@
 - Modify: `bootstrap/src/main/resources/application.yaml`
 - Test: `bootstrap/src/test/java/com/nageoffer/ai/ragent/career/service/CareerDemeanorAnalysisServiceTest.java`
 
-- [ ] Step 1: 定义 `CareerDemeanorAnalysisProvider`，将 observation 聚合与模型调用解耦。
-- [ ] Step 2: 请求 DTO 支持图片 URL/Base64 帧、采样时间、授权标识。
-- [ ] Step 3: provider 调用视觉/表情模型后归一化为 signal、confidence、limitation。
-- [ ] Step 4: 任何情况下 `includedInScore=false`；无授权直接 `CONSENT_REQUIRED`。
-- [ ] Step 5: 使用 mock provider 覆盖成功、无授权、失败降级、低置信度。
+- [x] Step 1: 定义 `CareerDemeanorAnalysisProvider`，将 observation 聚合与模型调用解耦。
+- [x] Step 2: 请求 DTO 支持图片 URL/Base64 帧、采样时间、授权标识。
+- [x] Step 3: provider 调用视觉/表情模型后归一化为 signal、confidence、limitation。
+- [x] Step 4: 任何情况下 `includedInScore=false`；无授权直接 `CONSENT_REQUIRED`。
+- [x] Step 5: 使用 mock provider 覆盖成功、无授权、失败降级、低置信度。
 
 **Acceptance:**
 - 神态分析只作为辅助信号。
