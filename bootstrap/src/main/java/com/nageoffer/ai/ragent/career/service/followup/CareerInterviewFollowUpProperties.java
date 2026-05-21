@@ -22,6 +22,8 @@ import lombok.Data;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Configuration;
 
+import java.util.List;
+
 /**
  * 面试追问规则配置，集中管理上限、低分阈值和低分兜底问题。
  */
@@ -33,6 +35,12 @@ public class CareerInterviewFollowUpProperties {
     private static final int DEFAULT_MAX_FOLLOW_UP_COUNT = 2;
     private static final int DEFAULT_LOW_SCORE_THRESHOLD = 60;
     private static final String DEFAULT_LOW_SCORE_FALLBACK_QUESTION = "能否再补充一个关键细节，说明你的思路或取舍？";
+    private static final List<String> DEFAULT_RULE_CHAIN = List.of(
+            "COMPLETED_STATE_GUARD",
+            "FOLLOW_UP_LIMIT",
+            "LLM_SUGGESTION",
+            "FEEDBACK_GAP",
+            "LOW_SCORE");
 
     /**
      * 单个会话允许创建的最大追问次数。
@@ -48,6 +56,11 @@ public class CareerInterviewFollowUpProperties {
      * 低分但无明确追问问题时使用的兜底追问。
      */
     private String lowScoreFallbackQuestion = DEFAULT_LOW_SCORE_FALLBACK_QUESTION;
+
+    /**
+     * LiteFlow 风格的追问规则节点顺序。节点 ID 未识别时会被忽略，空配置回退默认链。
+     */
+    private List<String> ruleChain = DEFAULT_RULE_CHAIN;
 
     /**
      * 返回生效的追问次数上限，允许配置为 0 表示完全不生成追问。
@@ -74,5 +87,18 @@ public class CareerInterviewFollowUpProperties {
      */
     public String effectiveLowScoreFallbackQuestion() {
         return StrUtil.blankToDefault(lowScoreFallbackQuestion, DEFAULT_LOW_SCORE_FALLBACK_QUESTION).trim();
+    }
+
+    /**
+     * 返回生效的规则节点顺序，允许 YAML 后续调整链路而不改 Java 代码。
+     */
+    public List<String> effectiveRuleChain() {
+        if (ruleChain == null || ruleChain.isEmpty()) {
+            return DEFAULT_RULE_CHAIN;
+        }
+        return ruleChain.stream()
+                .filter(StrUtil::isNotBlank)
+                .map(item -> item.trim().toUpperCase())
+                .toList();
     }
 }

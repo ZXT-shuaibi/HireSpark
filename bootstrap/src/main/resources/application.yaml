@@ -133,6 +133,12 @@ career:
       max-follow-up-count: 2
       low-score-threshold: 60
       low-score-fallback-question: 能否再补充一个关键细节，说明你的思路或取舍？
+      rule-chain:
+        - COMPLETED_STATE_GUARD
+        - FOLLOW_UP_LIMIT
+        - LLM_SUGGESTION
+        - FEEDBACK_GAP
+        - LOW_SCORE
   features:
     resume-export: true
     text-interview: true

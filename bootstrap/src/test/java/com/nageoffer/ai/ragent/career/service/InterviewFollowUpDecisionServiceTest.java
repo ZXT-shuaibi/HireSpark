@@ -173,6 +173,20 @@ class InterviewFollowUpDecisionServiceTest {
         assertEquals("请简要补充：边界条件处理。", decision.question());
     }
 
+    @Test
+    void configuredRuleFlowControlsDecisionOrder() {
+        CareerInterviewFollowUpProperties properties = new CareerInterviewFollowUpProperties();
+        properties.setRuleChain(List.of("COMPLETED_STATE_GUARD", "FOLLOW_UP_LIMIT", "LOW_SCORE", "FEEDBACK_GAP"));
+        DefaultInterviewFollowUpDecisionService configuredService = serviceWithConfiguredFlow(properties);
+
+        InterviewFollowUpDecision decision = configuredService.decide(request(55, false, null,
+                Map.of("missingPoints", List.of("复盘沉淀")),
+                List.of(turn("TECHNICAL"))));
+
+        assertTrue(decision.required());
+        assertEquals("LOW_SCORE", decision.matchedRule());
+    }
+
     // 构造追问决策请求，便于测试不同规则输入。
     private InterviewFollowUpDecisionRequest request(Integer score,
                                                      boolean llmFollowUpRequired,
@@ -222,5 +236,15 @@ class InterviewFollowUpDecisionServiceTest {
                 new MissingPointsRule(),
                 new LowScoreRule(properties)
         ));
+    }
+
+    private DefaultInterviewFollowUpDecisionService serviceWithConfiguredFlow(CareerInterviewFollowUpProperties properties) {
+        return new DefaultInterviewFollowUpDecisionService(List.of(
+                new CompletedStateGuardRule(),
+                new FollowUpLimitRule(properties),
+                new AiSuggestionRule(),
+                new MissingPointsRule(),
+                new LowScoreRule(properties)
+        ), properties);
     }
 }

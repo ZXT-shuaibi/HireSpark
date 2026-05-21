@@ -26,7 +26,10 @@ import com.nageoffer.ai.ragent.career.service.followup.rule.MissingPointsRule;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 /**
@@ -50,6 +53,11 @@ public class DefaultInterviewFollowUpDecisionService implements InterviewFollowU
      * 注入按顺序排列的追问决策规则节点。
      */
     @Autowired
+    public DefaultInterviewFollowUpDecisionService(List<FollowUpDecisionRule> rules,
+                                                   CareerInterviewFollowUpProperties properties) {
+        this.rules = buildRuleFlow(rules, properties);
+    }
+
     public DefaultInterviewFollowUpDecisionService(List<FollowUpDecisionRule> rules) {
         this.rules = rules == null ? List.of() : List.copyOf(rules);
     }
@@ -79,5 +87,48 @@ public class DefaultInterviewFollowUpDecisionService implements InterviewFollowU
                 new AiSuggestionRule(),
                 new MissingPointsRule(),
                 new LowScoreRule(properties));
+    }
+
+    private static List<FollowUpDecisionRule> buildRuleFlow(List<FollowUpDecisionRule> rules,
+                                                            CareerInterviewFollowUpProperties properties) {
+        if (rules == null || rules.isEmpty()) {
+            return List.of();
+        }
+        CareerInterviewFollowUpProperties safeProperties =
+                properties == null ? new CareerInterviewFollowUpProperties() : properties;
+        Map<String, FollowUpDecisionRule> registry = new LinkedHashMap<>();
+        for (FollowUpDecisionRule rule : rules) {
+            registry.putIfAbsent(ruleId(rule), rule);
+        }
+        List<FollowUpDecisionRule> configured = new ArrayList<>();
+        for (String ruleId : safeProperties.effectiveRuleChain()) {
+            FollowUpDecisionRule rule = registry.get(ruleId);
+            if (rule != null && !configured.contains(rule)) {
+                configured.add(rule);
+            }
+        }
+        if (configured.isEmpty()) {
+            return List.copyOf(rules);
+        }
+        return List.copyOf(configured);
+    }
+
+    private static String ruleId(FollowUpDecisionRule rule) {
+        if (rule instanceof CompletedStateGuardRule) {
+            return "COMPLETED_STATE_GUARD";
+        }
+        if (rule instanceof FollowUpLimitRule) {
+            return "FOLLOW_UP_LIMIT";
+        }
+        if (rule instanceof AiSuggestionRule) {
+            return "LLM_SUGGESTION";
+        }
+        if (rule instanceof MissingPointsRule) {
+            return "FEEDBACK_GAP";
+        }
+        if (rule instanceof LowScoreRule) {
+            return "LOW_SCORE";
+        }
+        return rule.getClass().getSimpleName().toUpperCase();
     }
 }
