@@ -16,6 +16,18 @@ CHECKS = {
         "bootstrap/src/main/java/com/nageoffer/ai/ragent/career/service/render/ResumeRenderValidationResult.java",
         ["fontStrategy"],
     ),
+    "P2 font manifest": (
+        "bootstrap/src/main/resources/fonts/font-manifest.yaml",
+        ["Noto Sans SC", "SIL Open Font License 1.1", "classpath:/fonts/NotoSansSC-Regular.ttf"],
+    ),
+    "P2 bundled font": (
+        "bootstrap/src/main/resources/fonts/NotoSansSC-Regular.ttf",
+        [],
+    ),
+    "P2 CJK render sample": (
+        "bootstrap/src/test/java/com/nageoffer/ai/ragent/career/service/ResumeRenderPipelineTest.java",
+        ["htmlPdfAndDocxRenderCjkTypographyAcceptanceSample", "bundledFontManifestAndRegularFontAreAvailableForPdfRegistration"],
+    ),
     "P3 memory tests": (
         "bootstrap/src/main/java/com/nageoffer/ai/ragent/rag/core/memory/ConversationMemoryBucket.java",
         ["HOT_CONTEXT", "SHORT_SUMMARY", "LONG_TERM_FACT", "KEY_EVIDENCE", "RISK_FLAG"],

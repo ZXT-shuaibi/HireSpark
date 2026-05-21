@@ -34,7 +34,7 @@
 ### 1.3 明确纠偏
 
 - 没有找到 `DemeanorNormalizationStrategy` 源码；神态/表情分析应作为后续体验增强项重新设计和验收。
-- 字体当前只是 CSS fallback；尚未完成字体文件来源、授权、加载、PDF/DOCX 嵌入、跨平台渲染和缺字回退治理。
+- 字体治理已补齐内置 Noto Sans SC Regular、`font-manifest.yaml`、PDF 字体注册和 HTML/PDF/DOCX CJK 样例验收；后续只需按企业授权策略替换或扩展字体族。
 - FreeMarker 暂不优先；当前阶段只保留为模板复杂化后的可选升级，不作为 P0/P1/P2 交付阻塞项。
 - 不再把 Single-flight、快照恢复、FollowUpDecisionRule、WebSocket ASR、Resilience4j guard、Judge-Executor、多格式渲染、HyDE/Rerank、Agent observability、Plan-and-Execute 作为“未融合”主缺口。
 

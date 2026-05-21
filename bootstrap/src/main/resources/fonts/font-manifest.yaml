@@ -1,0 +1,31 @@
+version: 1
+policy: governed-cjk-render-fonts
+defaultFamily: Noto Sans SC
+resources:
+  - id: noto-sans-sc-regular
+    family: Noto Sans SC
+    style: normal
+    weight: 400
+    file: classpath:/fonts/NotoSansSC-Regular.ttf
+    source: Google Noto Sans Simplified Chinese
+    upstream: https://fonts.google.com/noto/specimen/Noto+Sans+SC
+    license: SIL Open Font License 1.1
+    charset:
+      - CJK Unified Ideographs
+      - Basic Latin
+      - General Punctuation
+      - Currency Symbols
+    loading:
+      html: CSS font-family stack
+      pdf: openhtmltopdf registered classpath font
+      docx: document font declaration through XHTML import fallback
+    fallback:
+      - Noto Sans CJK SC
+      - Microsoft YaHei
+      - SimHei
+      - SimSun
+      - Arial
+      - sans-serif
+notes:
+  - Bundled font is used to make CI and local PDF rendering reproducible.
+  - Operators may override career.render.font.paths with licensed system or private fonts.

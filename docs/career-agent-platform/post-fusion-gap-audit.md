@@ -10,7 +10,7 @@
 | --- | --- | --- |
 | OpenAPI 契约交付 | `OpenApiDocumentationConfig`、Career Controller `@Tag` / `@Operation`、`CareerOpenApiContractTest` | 已引入 |
 | Docker/Compose/CI/Actuator | `Dockerfile`、`ragent-dev-stack.compose.yaml`、`.github/workflows/ci.yml`、Actuator health/readiness | 已引入 |
-| 字体治理与导出可追溯 | `ResumeRenderFontRegistry`、`ResumeRenderValidationResult.fontStrategy`、导出记录 validation payload | 已引入 |
+| 字体治理与导出可追溯 | `fonts/font-manifest.yaml`、`fonts/NotoSansSC-Regular.ttf`、`ResumeRenderFontRegistry`、`ResumeRenderValidationResult.fontStrategy`、导出记录 validation payload、CJK 渲染验收样例 | 已引入 |
 | 混合压缩记忆 | `ConversationMemoryBucket`、`ConversationMemoryCompressionPlanner`、trigger policy 与 memory tests | 已引入 |
 | 长文本 TTS | `CareerTextToSpeechService`、`XunfeiLongTextToSpeechProvider`、`/career/interviews/{sessionId}/tts/plan`、`CareerTextToSpeechServiceTest` | 已引入为可降级 provider 能力，默认关闭 |
 | 神态/表情分析 | `CareerDemeanorAnalysisService`、`/career/interviews/{sessionId}/demeanor/analyze`、`CareerDemeanorAnalysisServiceTest` | 已引入为可关闭辅助信号 |

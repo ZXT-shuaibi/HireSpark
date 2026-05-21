@@ -1,11 +1,16 @@
 package com.nageoffer.ai.ragent.career.service;
 
 import com.nageoffer.ai.ragent.career.dao.entity.ResumeVersionDO;
+import com.nageoffer.ai.ragent.career.service.render.ResumeRenderFontProperties;
+import com.nageoffer.ai.ragent.career.service.render.ResumeRenderFontRegistry;
 import com.nageoffer.ai.ragent.career.service.render.ResumeRenderOutput;
 import com.nageoffer.ai.ragent.career.service.render.ResumeRenderPipeline;
 import com.nageoffer.ai.ragent.career.service.render.ResumeRenderValidationResult;
+import com.openhtmltopdf.pdfboxout.PdfRendererBuilder;
 import org.junit.jupiter.api.Test;
+import org.springframework.core.io.DefaultResourceLoader;
 
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -93,6 +98,48 @@ class ResumeRenderPipelineTest {
         assertEquals("operator-must-provide-licensed-font-files", fontStrategy.get("license"));
         assertEquals("classpath-or-file-resource-registration", fontStrategy.get("loading"));
         assertEquals("controlled-fallback-or-fail-on-missing-fonts", fontStrategy.get("fallback"));
+    }
+
+    @Test
+    void bundledFontManifestAndRegularFontAreAvailableForPdfRegistration() {
+        org.springframework.core.io.Resource manifest = new DefaultResourceLoader()
+                .getResource("classpath:/fonts/font-manifest.yaml");
+        ResumeRenderFontRegistry registry = new ResumeRenderFontRegistry(
+                new ResumeRenderFontProperties(), new DefaultResourceLoader());
+
+        ResumeRenderFontRegistry.FontRegistrationReport report =
+                registry.registerPdfFonts(new PdfRendererBuilder().toStream(new ByteArrayOutputStream()));
+
+        assertTrue(manifest.exists());
+        assertTrue(report.registered().contains("classpath:/fonts/NotoSansSC-Regular.ttf"));
+        assertTrue(report.registeredCount() >= 1);
+    }
+
+    @Test
+    void htmlPdfAndDocxRenderCjkTypographyAcceptanceSample() throws Exception {
+        String cjkSample = cjkTypographySample();
+        ResumeVersionDO version = ResumeVersionDO.builder()
+                .id("version-cjk")
+                .title("CJK Typography")
+                .contentJson("{\"basic\":{\"name\":\"CJK Typography\"}}")
+                .markdownContent(cjkSample)
+                .build();
+
+        String html = pipeline.buildHtmlDocument(version, cjkSample);
+        byte[] pdf = pipeline.renderPdf(html);
+        byte[] docx = pipeline.renderDocx(html);
+        String documentXml = zipEntryText(docx, "word/document.xml");
+
+        org.assertj.core.api.Assertions.assertThat(html)
+                .contains("\u5f20\u4e09", "Senior Java Engineer", "\u2713", "\uffe5")
+                .contains("<strong>\u7c97\u4f53\u80fd\u529b</strong>")
+                .contains("\u8fd9\u662f\u4e00\u6bb5\u7528\u4e8e\u9a8c\u6536\u6362\u884c");
+        assertTrue(new String(pdf, 0, 4, StandardCharsets.US_ASCII).startsWith("%PDF"));
+        assertTrue(pdf.length > 1024);
+        org.assertj.core.api.Assertions.assertThat(documentXml)
+                .contains("\u5f20\u4e09", "Senior Java Engineer", "\u2713", "\uffe5")
+                .contains("\u7c97\u4f53\u80fd\u529b")
+                .contains("\u8fd9\u662f\u4e00\u6bb5\u7528\u4e8e\u9a8c\u6536\u6362\u884c");
     }
 
     @Test
@@ -221,6 +268,16 @@ class ResumeRenderPipelineTest {
                 .build();
     }
 
+    private String cjkTypographySample() {
+        return """
+                # \u5f20\u4e09 / Senior Java Engineer
+
+                **\u7c97\u4f53\u80fd\u529b**\uff1aSpring Boot\u3001Redis\u3001PostgreSQL\uff0c\u7b26\u53f7\u9a8c\u6536\uff1a\u2713 \u00b7 \u2192 \u00b7 \uffe5 \u00b7 % \u00b7 # \u00b7 ().
+
+                \u8fd9\u662f\u4e00\u6bb5\u7528\u4e8e\u9a8c\u6536\u6362\u884c\u548c\u957f\u6bb5\u843d\u6e32\u67d3\u7684\u4e2d\u6587\u5185\u5bb9\uff0c\u8981\u540c\u65f6\u8986\u76d6\u4e2d\u6587\u6807\u70b9\u3001\u82f1\u6587\u8bcd\u7ec4\u3001\u6570\u5b57 12345 \u548c\u5e38\u89c1\u7b26\u53f7\uff0c\u786e\u4fdd HTML\u3001PDF \u548c DOCX \u90fd\u80fd\u7a33\u5b9a\u4ea7\u51fa\u53ef\u9a8c\u6536\u6587\u6863\u3002
+                """;
+    }
+
     /**
      * 判断 DOCX 压缩包内是否包含指定条目。
      */
@@ -233,6 +290,18 @@ class ResumeRenderPipelineTest {
                 }
             }
             return false;
+        }
+    }
+
+    private String zipEntryText(byte[] content, String expectedName) throws Exception {
+        try (ZipInputStream zipInputStream = new ZipInputStream(new java.io.ByteArrayInputStream(content))) {
+            ZipEntry entry;
+            while ((entry = zipInputStream.getNextEntry()) != null) {
+                if (expectedName.equals(entry.getName())) {
+                    return new String(zipInputStream.readAllBytes(), StandardCharsets.UTF_8);
+                }
+            }
+            return "";
         }
     }
 }
