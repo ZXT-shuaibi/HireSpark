@@ -64,10 +64,10 @@
 - Modify: `bootstrap/src/main/resources/META-INF/additional-spring-configuration-metadata.json`
 - Test: `bootstrap/src/test/java/com/nageoffer/ai/ragent/career/service/CareerTextToSpeechServiceTest.java`
 
-- [ ] Step 1: 定义 `CareerTextToSpeechProvider`，将当前 plan 层与实际 provider 调用解耦。
-- [ ] Step 2: 新增 Xunfei long-text TTS properties，包含 appId、apiKey、apiSecret、submitUrl、queryUrl、downloadUrl、timeout、poll interval、max polls。
-- [ ] Step 3: 用 OkHttp 实现 HMAC-SHA256 鉴权、任务提交、轮询、音频下载解析。
-- [ ] Step 4: provider 失败时返回 `TEXT_FALLBACK`，保留 `fallbackText`、`degradeReason`。
+- [x] Step 1: 定义 `CareerTextToSpeechProvider`，将当前 plan 层与实际 provider 调用解耦。
+- [x] Step 2: 新增 Xunfei long-text TTS properties，包含 appId、apiKey、apiSecret、submitUrl、queryUrl、downloadUrl、timeout、poll interval、max polls。
+- [x] Step 3: 用 OkHttp 实现 HMAC-SHA256 鉴权、任务提交、轮询、音频下载解析。
+- [x] Step 4: provider 失败时返回 `TEXT_FALLBACK`，保留 `fallbackText`、`degradeReason`。
 - [ ] Step 5: 使用 mock HTTP 覆盖成功、任务失败、轮询超时、配置不完整。
 
 **Acceptance:**

@@ -10,5 +10,12 @@ public record CareerTextToSpeechPlan(boolean enabled,
                                      String fallbackText,
                                      String degradeReason,
                                      String voice,
-                                     int cacheTtlSeconds) {
+                                     int cacheTtlSeconds,
+                                     String taskId,
+                                     String taskStatus,
+                                     String audioBase64,
+                                     String audioUrl,
+                                     String pybufContent,
+                                     boolean completed,
+                                     boolean success) {
 }

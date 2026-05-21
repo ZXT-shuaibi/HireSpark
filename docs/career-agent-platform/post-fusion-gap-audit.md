@@ -12,7 +12,7 @@
 | Docker/Compose/CI/Actuator | `Dockerfile`、`ragent-dev-stack.compose.yaml`、`.github/workflows/ci.yml`、Actuator health/readiness | 已引入 |
 | 字体治理与导出可追溯 | `ResumeRenderFontRegistry`、`ResumeRenderValidationResult.fontStrategy`、导出记录 validation payload | 已引入 |
 | 混合压缩记忆 | `ConversationMemoryBucket`、`ConversationMemoryCompressionPlanner`、trigger policy 与 memory tests | 已引入 |
-| 长文本 TTS | `CareerTextToSpeechService`、`/career/interviews/{sessionId}/tts/plan`、`CareerTextToSpeechServiceTest` | 已引入为可降级计划层 |
+| 长文本 TTS | `CareerTextToSpeechService`、`XunfeiLongTextToSpeechProvider`、`/career/interviews/{sessionId}/tts/plan`、`CareerTextToSpeechServiceTest` | 已引入为可降级 provider 能力，默认关闭 |
 | 神态/表情分析 | `CareerDemeanorAnalysisService`、`/career/interviews/{sessionId}/demeanor/analyze`、`CareerDemeanorAnalysisServiceTest` | 已引入为可关闭辅助信号 |
 | 统一验收矩阵 | `post-fusion-acceptance-matrix.md`、`scripts/verify_post_fusion_acceptance.py` | 已引入 |
 | Single-flight 大结果回放 | `CareerSingleFlightLlmServiceImpl`、`CareerSingleFlightTest.llmWrapperPersistsLargeAiResultWithoutTruncatingReplay` | 已补齐 gzip + Base64 完整回放 |
@@ -21,7 +21,7 @@
 
 | 项 | 当前状态 | 后续处理 |
 | --- | --- | --- |
-| 真实第三方 TTS 音频供应商调用 | 已有 TTS plan endpoint，尚未提交/轮询/下载真实音频 | 按 `deep-gap-development-plan.md` 阶段 2 接入 provider |
+| 真实第三方 TTS 音频供应商调用 | 已接入讯飞长文本 TTS provider，尚需 mock HTTP 覆盖和真实密钥联调 | 继续补阶段 2 的 provider 级 HTTP 测试与联调记录 |
 | 真实神态/表情模型 | 已有授权与辅助信号边界，尚未图片上传和模型调用 | 按 `deep-gap-development-plan.md` 阶段 3 接入 provider |
 | 邮件验证码 | Auth 当前只有登录/登出 | 按阶段 4 增加验证码、TTL、频控和注册/找回密码校验 |
 | FollowUp 规则链配置化 | 已有节点式规则链，但不是 YAML/LiteFlow 热配置 | 按阶段 5 做配置顺序、启停和命中审计 |

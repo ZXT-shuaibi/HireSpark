@@ -86,6 +86,66 @@
       "description": "TTL for cached TTS artifacts when an implementation stores audio chunks."
     },
     {
+      "name": "career.tts.provider",
+      "type": "java.lang.String",
+      "description": "Logical TTS provider name. Use none for planning only or xunfei for long-text synthesis."
+    },
+    {
+      "name": "career.tts.xunfei.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether the Xunfei long-text TTS HTTP provider is enabled."
+    },
+    {
+      "name": "career.tts.xunfei.app-id",
+      "type": "java.lang.String",
+      "description": "Xunfei long-text TTS app id."
+    },
+    {
+      "name": "career.tts.xunfei.api-key",
+      "type": "java.lang.String",
+      "description": "Xunfei long-text TTS API key."
+    },
+    {
+      "name": "career.tts.xunfei.api-secret",
+      "type": "java.lang.String",
+      "description": "Xunfei long-text TTS API secret."
+    },
+    {
+      "name": "career.tts.xunfei.host",
+      "type": "java.lang.String",
+      "description": "Xunfei long-text TTS API host."
+    },
+    {
+      "name": "career.tts.xunfei.create-path",
+      "type": "java.lang.String",
+      "description": "Xunfei long-text TTS task creation path."
+    },
+    {
+      "name": "career.tts.xunfei.query-path",
+      "type": "java.lang.String",
+      "description": "Xunfei long-text TTS task query path."
+    },
+    {
+      "name": "career.tts.xunfei.audio-encoding",
+      "type": "java.lang.String",
+      "description": "Audio encoding requested from Xunfei long-text TTS."
+    },
+    {
+      "name": "career.tts.xunfei.timeout-seconds",
+      "type": "java.lang.Integer",
+      "description": "Maximum seconds to wait for a Xunfei long-text TTS task."
+    },
+    {
+      "name": "career.tts.xunfei.poll-interval-millis",
+      "type": "java.lang.Integer",
+      "description": "Polling interval for Xunfei long-text TTS task status."
+    },
+    {
+      "name": "career.tts.xunfei.max-text-chars",
+      "type": "java.lang.Integer",
+      "description": "Maximum text length accepted by the Xunfei TTS provider."
+    },
+    {
       "name": "career.demeanor.enabled",
       "type": "java.lang.Boolean",
       "description": "Whether optional demeanor and expression auxiliary analysis is enabled."

@@ -143,6 +143,25 @@ career:
     chunk-max-chars: 180
     voice: default
     cache-ttl-seconds: 3600
+    provider: none
+    xunfei:
+      enabled: false
+      app-id: ${XUNFEI_TTS_APP_ID:}
+      api-key: ${XUNFEI_TTS_API_KEY:}
+      api-secret: ${XUNFEI_TTS_API_SECRET:}
+      host: api-dx.xf-yun.com
+      create-path: /v1/private/dts_create
+      query-path: /v1/private/dts_query
+      language: zh
+      speed: 50
+      volume: 50
+      pitch: 50
+      rhy: 0
+      audio-encoding: lame
+      sample-rate: 16000
+      timeout-seconds: 90
+      poll-interval-millis: 1500
+      max-text-chars: 100000
   demeanor:
     enabled: false
     retention-policy: derived-summary-only
