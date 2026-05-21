@@ -50,3 +50,14 @@ mvn -pl bootstrap -am -Dtest=CareerOpenApiContractTest,CareerTextToSpeechService
 mvn -pl bootstrap -am -DskipTests compile
 cd frontend && npm run build
 ```
+## 阶段 4 最新落点
+
+“邮件验证码”缺口已按确认后的业务要求改为手机号短信验证码，并完成后端底座：
+
+- `/auth/sms/send`：按手机号和用途发送验证码，内置手机号/IP 频控。
+- `/auth/sms/verify`：验证码通过后返回一次性 ticket。
+- `/auth/register`：手机号 ticket + 昵称 + 两次密码一致后注册。
+- `/auth/password/reset`：手机号 reset ticket + 两次密码一致后重置密码。
+- 登录仍兼容用户名登录，同时支持手机号作为登录标识；失败 10 次临时封禁。
+- 新增 PBKDF2 密码哈希，历史明文密码只在登录成功时迁移。
+- 阿里云短信 sender 已接入配置入口，默认不开真实发送，避免本地开发误发短信。

@@ -153,3 +153,19 @@
 2. 阶段 2/3 需要供应商 API 细节或可用 AI-Meeting 源码对照；缺少时先做 provider 接口和 mock client，不伪造真实成功。
 3. 阶段 4/5 可与阶段 2/3 并行，但提交必须独立。
 4. 阶段 6 等 RAG 协议确认后执行。
+## 阶段 4 修订：手机号短信验证码与密码安全治理
+
+用户确认后，阶段 4 从“邮件验证码”调整为“手机号短信验证码”。实现边界如下：
+
+- 注册：先通过 `phone + code` 换取一次性 `register ticket`，再提交 `phone + ticket + nickname + password + confirmPassword`；两次密码一致且手机号/昵称未占用才创建用户。
+- 找回密码：先通过 `phone + code` 换取一次性 `reset_password ticket`，再提交新密码和确认密码；ticket 成功消费后更新密码。
+- 密码安全：新密码使用 PBKDF2-HMAC-SHA256 存储，禁止明文落库；历史明文密码只允许在登录成功时兼容校验并自动迁移为哈希。
+- 验证码安全：验证码只以哈希形式写入 Redis，TTL 5 分钟；同一验证码错误 3 次后失效；ticket TTL 10 分钟且一次性消费。
+- 频控：同手机号 60 秒冷却、10 分钟最多 3 次发送；IP 10 分钟最多 30 次发送；登录失败 10 次后临时封禁 30 分钟。
+- 短信供应商：默认 `logging` 发送器用于本地开发；生产通过 `ragent.auth.sms.provider=aliyun` 启用阿里云短信，使用环境变量注入 AccessKey、签名和模板码。
+
+验收命令：
+
+```bash
+mvn -pl bootstrap -am -Dtest=UserPasswordServiceTest,SmsVerificationServiceTest,AuthPhoneFlowServiceTest,LoginFailureTrackerTest -Dsurefire.failIfNoSpecifiedTests=false test
+```

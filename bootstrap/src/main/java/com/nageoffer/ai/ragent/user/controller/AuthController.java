@@ -18,10 +18,18 @@
 package com.nageoffer.ai.ragent.user.controller;
 
 import com.nageoffer.ai.ragent.user.controller.request.LoginRequest;
+import com.nageoffer.ai.ragent.user.controller.request.PasswordResetRequest;
+import com.nageoffer.ai.ragent.user.controller.request.PhoneRegisterRequest;
+import com.nageoffer.ai.ragent.user.controller.request.SmsCodeSendRequest;
+import com.nageoffer.ai.ragent.user.controller.request.SmsCodeVerifyRequest;
 import com.nageoffer.ai.ragent.user.controller.vo.LoginVO;
+import com.nageoffer.ai.ragent.user.controller.vo.SmsTicketVO;
 import com.nageoffer.ai.ragent.framework.convention.Result;
 import com.nageoffer.ai.ragent.framework.web.Results;
 import com.nageoffer.ai.ragent.user.service.AuthService;
+import com.nageoffer.ai.ragent.user.service.auth.AuthPhoneFlowService;
+import com.nageoffer.ai.ragent.user.service.auth.SmsVerificationService;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -37,12 +45,40 @@ public class AuthController {
 
     private final AuthService authService;
 
+    private final SmsVerificationService smsVerificationService;
+
+    private final AuthPhoneFlowService authPhoneFlowService;
+
     /**
      * 用户登录接口
      */
     @PostMapping("/auth/login")
     public Result<LoginVO> login(@RequestBody LoginRequest requestParam) {
         return Results.success(authService.login(requestParam));
+    }
+
+    @PostMapping("/auth/sms/send")
+    public Result<Void> sendSmsCode(@RequestBody SmsCodeSendRequest requestParam, HttpServletRequest request) {
+        smsVerificationService.sendCode(requestParam.getPhone(), requestParam.getPurpose(), clientIp(request));
+        return Results.success();
+    }
+
+    @PostMapping("/auth/sms/verify")
+    public Result<SmsTicketVO> verifySmsCode(@RequestBody SmsCodeVerifyRequest requestParam) {
+        String ticket = smsVerificationService.verifyCode(
+                requestParam.getPhone(), requestParam.getPurpose(), requestParam.getCode());
+        return Results.success(new SmsTicketVO(ticket));
+    }
+
+    @PostMapping("/auth/register")
+    public Result<String> register(@RequestBody PhoneRegisterRequest requestParam) {
+        return Results.success(authPhoneFlowService.register(requestParam));
+    }
+
+    @PostMapping("/auth/password/reset")
+    public Result<Void> resetPassword(@RequestBody PasswordResetRequest requestParam) {
+        authPhoneFlowService.resetPassword(requestParam);
+        return Results.success();
     }
 
     /**
@@ -52,5 +88,13 @@ public class AuthController {
     public Result<Void> logout() {
         authService.logout();
         return Results.success();
+    }
+
+    private String clientIp(HttpServletRequest request) {
+        String forwardedFor = request.getHeader("X-Forwarded-For");
+        if (forwardedFor != null && !forwardedFor.isBlank()) {
+            return forwardedFor.split(",")[0].trim();
+        }
+        return request.getRemoteAddr();
     }
 }

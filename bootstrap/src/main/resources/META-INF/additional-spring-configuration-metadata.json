@@ -214,6 +214,56 @@
       "name": "career.demeanor.xingchen.max-image-bytes",
       "type": "java.lang.Integer",
       "description": "Maximum decoded image size accepted for XingChen demeanor uploads."
+    },
+    {
+      "name": "ragent.auth.sms.provider",
+      "type": "java.lang.String",
+      "description": "SMS verification sender provider. Use logging for local development or aliyun for Aliyun SMS."
+    },
+    {
+      "name": "ragent.auth.sms.code-ttl",
+      "type": "java.time.Duration",
+      "description": "How long a phone verification code remains valid."
+    },
+    {
+      "name": "ragent.auth.sms.ticket-ttl",
+      "type": "java.time.Duration",
+      "description": "How long a verified registration or password reset ticket remains valid."
+    },
+    {
+      "name": "ragent.auth.sms.resend-cooldown",
+      "type": "java.time.Duration",
+      "description": "Minimum interval before the same phone can request another SMS code."
+    },
+    {
+      "name": "ragent.auth.sms.max-send-per-window",
+      "type": "java.lang.Integer",
+      "description": "Maximum SMS sends allowed for one phone during the send window."
+    },
+    {
+      "name": "ragent.auth.sms.max-verify-failures",
+      "type": "java.lang.Integer",
+      "description": "Wrong code attempts allowed before invalidating the current code."
+    },
+    {
+      "name": "ragent.auth.sms.aliyun.access-key-id",
+      "type": "java.lang.String",
+      "description": "Aliyun SMS access key id."
+    },
+    {
+      "name": "ragent.auth.sms.aliyun.access-key-secret",
+      "type": "java.lang.String",
+      "description": "Aliyun SMS access key secret."
+    },
+    {
+      "name": "ragent.auth.sms.aliyun.sign-name",
+      "type": "java.lang.String",
+      "description": "Aliyun SMS sign name."
+    },
+    {
+      "name": "ragent.auth.sms.aliyun.template-code",
+      "type": "java.lang.String",
+      "description": "Aliyun SMS template code whose TemplateParam contains code."
     }
   ]
 }

@@ -11,6 +11,7 @@ CREATE EXTENSION IF NOT EXISTS vector;
 CREATE TABLE t_user (
     id           VARCHAR(20)  NOT NULL PRIMARY KEY,
     username     VARCHAR(64)  NOT NULL,
+    phone        VARCHAR(20),
     password     VARCHAR(128) NOT NULL,
     role         VARCHAR(32)  NOT NULL,
     avatar       VARCHAR(128),
@@ -19,6 +20,7 @@ CREATE TABLE t_user (
     deleted      SMALLINT     DEFAULT 0,
     CONSTRAINT uk_user_username UNIQUE (username)
 );
+CREATE UNIQUE INDEX uk_user_phone ON t_user (phone) WHERE phone IS NOT NULL AND deleted = 0;
 COMMENT ON TABLE t_user IS '系统用户表';
 COMMENT ON COLUMN t_user.id IS '主键ID';
 COMMENT ON COLUMN t_user.username IS '用户名，唯一';
