@@ -24,6 +24,8 @@ import com.nageoffer.ai.ragent.career.dao.entity.CareerAgentExecutionTraceDO;
 import com.nageoffer.ai.ragent.career.dao.entity.CareerSingleFlightRecordDO;
 import com.nageoffer.ai.ragent.career.dao.entity.CareerTaskAttemptDO;
 import com.nageoffer.ai.ragent.career.service.attempt.CareerTaskAttemptRecorder;
+import com.nageoffer.ai.ragent.career.service.agent.CareerAgentDescriptor;
+import com.nageoffer.ai.ragent.career.service.agent.CareerAgentResolver;
 import com.nageoffer.ai.ragent.career.service.guard.CareerAiGuardService;
 import com.nageoffer.ai.ragent.career.service.observability.CareerAgentTraceCommand;
 import com.nageoffer.ai.ragent.career.service.observability.CareerAgentTraceService;
@@ -64,6 +66,7 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
     private final CareerSingleFlightLocalReplayCache localReplayCache;
     private final CareerSingleFlightHeartbeatManager heartbeatManager;
     private final CareerAgentTraceService careerAgentTraceService;
+    private final CareerAgentResolver careerAgentResolver;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     /**
@@ -80,6 +83,7 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
                 new CareerSingleFlightProperties(),
                 new CareerSingleFlightLocalReplayCache(),
                 new CareerSingleFlightHeartbeatManager(),
+                null,
                 null);
     }
 
@@ -98,6 +102,7 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
                 singleFlightProperties,
                 new CareerSingleFlightLocalReplayCache(),
                 new CareerSingleFlightHeartbeatManager(),
+                null,
                 null);
     }
 
@@ -118,6 +123,7 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
                 singleFlightProperties,
                 localReplayCache,
                 heartbeatManager,
+                null,
                 null);
     }
 
@@ -132,7 +138,8 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
                                             CareerSingleFlightProperties singleFlightProperties,
                                             CareerSingleFlightLocalReplayCache localReplayCache,
                                             CareerSingleFlightHeartbeatManager heartbeatManager,
-                                            CareerAgentTraceService careerAgentTraceService) {
+                                            CareerAgentTraceService careerAgentTraceService,
+                                            CareerAgentResolver careerAgentResolver) {
         this.singleFlightService = singleFlightService;
         this.llmService = llmService;
         this.attemptRecorder = attemptRecorder;
@@ -141,6 +148,7 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
         this.localReplayCache = localReplayCache == null ? new CareerSingleFlightLocalReplayCache() : localReplayCache;
         this.heartbeatManager = heartbeatManager == null ? new CareerSingleFlightHeartbeatManager() : heartbeatManager;
         this.careerAgentTraceService = careerAgentTraceService;
+        this.careerAgentResolver = careerAgentResolver == null ? new CareerAgentResolver() : careerAgentResolver;
     }
 
     /**
@@ -232,13 +240,13 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
         if (careerAgentTraceService == null) {
             return null;
         }
-        AgentContext context = parseAgentContext(scene, singleFlightKey);
+        CareerAgentDescriptor descriptor = careerAgentResolver.resolve(scene, singleFlightKey);
         try {
             return careerAgentTraceService.startExecution(CareerAgentTraceCommand.builder()
-                    .agentType(context.scene())
-                    .scene(context.businessScene())
-                    .sessionId(context.businessId())
-                    .userId(context.userId())
+                    .agentType(descriptor.agentType())
+                    .scene(descriptor.businessScene().name())
+                    .sessionId(descriptor.businessId())
+                    .userId(descriptor.userId())
                     .traceId(traceId)
                     .modelName("RagentModelRouter")
                     .input(request)
@@ -275,30 +283,6 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
         } catch (RuntimeException ex) {
             log.warn("Career Agent 调用失败观测写入失败，忽略观测写入：traceId={}", trace.getTraceId(), ex);
         }
-    }
-
-    /**
-     * 从 single-flight 原始键中解析用户和业务对象。
-     */
-    private AgentContext parseAgentContext(String scene, String singleFlightKey) {
-        String normalizedScene = StrUtil.blankToDefault(scene, "CAREER_AI").trim();
-        String businessScene = normalizedScene.contains("INTERVIEW") ? "INTERVIEW"
-                : normalizedScene.contains("OPTIMIZATION") ? "OPTIMIZATION"
-                : normalizedScene.contains("JD") ? "ALIGNMENT"
-                : normalizedScene.contains("RESUME") ? "RESUME"
-                : "CAREER";
-        String userId = null;
-        String businessId = null;
-        if (StrUtil.isNotBlank(singleFlightKey)) {
-            String[] parts = singleFlightKey.split(":", 4);
-            if (parts.length > 1) {
-                userId = blankToNull(parts[1]);
-            }
-            if (parts.length > 2) {
-                businessId = blankToNull(parts[2]);
-            }
-        }
-        return new AgentContext(normalizedScene, businessScene, userId, businessId);
     }
 
     /**
@@ -489,6 +473,4 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
         }
     }
 
-    private record AgentContext(String scene, String businessScene, String userId, String businessId) {
-    }
 }

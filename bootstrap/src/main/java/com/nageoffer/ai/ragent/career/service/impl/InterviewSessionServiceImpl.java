@@ -19,6 +19,9 @@ import com.nageoffer.ai.ragent.career.dao.mapper.ResumeVersionMapper;
 import com.nageoffer.ai.ragent.career.enums.InterviewSessionStatus;
 import com.nageoffer.ai.ragent.career.enums.InterviewTurnType;
 import com.nageoffer.ai.ragent.career.service.InterviewSessionService;
+import com.nageoffer.ai.ragent.career.service.agent.BusinessAgentScene;
+import com.nageoffer.ai.ragent.career.service.decision.CareerDecisionIndexCommand;
+import com.nageoffer.ai.ragent.career.service.decision.CareerDecisionIndexService;
 import com.nageoffer.ai.ragent.career.service.flow.InterviewFlowStateMachine;
 import com.nageoffer.ai.ragent.career.service.followup.InterviewFollowUpDecision;
 import com.nageoffer.ai.ragent.career.service.followup.InterviewFollowUpDecisionRequest;
@@ -31,6 +34,8 @@ import com.nageoffer.ai.ragent.career.service.progress.CareerProgressStreamServi
 import com.nageoffer.ai.ragent.career.service.retrieval.CareerRetrievalEnhancement;
 import com.nageoffer.ai.ragent.career.service.retrieval.CareerRetrievalEnhancementService;
 import com.nageoffer.ai.ragent.career.service.runtime.InterviewTurnRuntimeService;
+import com.nageoffer.ai.ragent.career.service.scoring.InterviewRuleBasedScore;
+import com.nageoffer.ai.ragent.career.service.scoring.InterviewRuleBasedScorer;
 import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightLlmService;
 import com.nageoffer.ai.ragent.framework.context.UserContext;
 import com.nageoffer.ai.ragent.framework.convention.ChatMessage;
@@ -81,6 +86,8 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private InterviewPlanExecuteReflectService interviewPlanExecuteReflectService;
     private ConversationMemoryService conversationMemoryService;
+    private InterviewRuleBasedScorer interviewRuleBasedScorer = new InterviewRuleBasedScorer();
+    private CareerDecisionIndexService careerDecisionIndexService;
 
     /**
      * 注入面试 Plan-and-Execute 编排服务，缺省时保留原线性流程以兼容单测和降级。
@@ -93,6 +100,18 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
     @Autowired(required = false)
     public void setConversationMemoryService(ConversationMemoryService conversationMemoryService) {
         this.conversationMemoryService = conversationMemoryService;
+    }
+
+    @Autowired(required = false)
+    public void setInterviewRuleBasedScorer(InterviewRuleBasedScorer interviewRuleBasedScorer) {
+        if (interviewRuleBasedScorer != null) {
+            this.interviewRuleBasedScorer = interviewRuleBasedScorer;
+        }
+    }
+
+    @Autowired(required = false)
+    public void setCareerDecisionIndexService(CareerDecisionIndexService careerDecisionIndexService) {
+        this.careerDecisionIndexService = careerDecisionIndexService;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -604,9 +623,50 @@ public class InterviewSessionServiceImpl implements InterviewSessionService {
         Map<String, Object> parsed = careerJsonParser.parseObject(response);
         Integer score = readScore(parsed.get("score"));
         Map<String, Object> feedback = buildFeedback(parsed);
+        InterviewRuleBasedScore ruleScore = interviewRuleBasedScorer.score(score, turn.getQuestion(), answer, feedback);
+        score = ruleScore.finalScore();
+        feedback.put("ruleBasedScore", Map.of(
+                "matchedRules", ruleScore.matchedRules(),
+                "explanations", ruleScore.explanations(),
+                "dimensions", ruleScore.dimensions()));
+        recordInterviewEvaluationDecision(session, turn, userId, score, feedback, ruleScore);
         boolean followUpRequired = readBoolean(parsed.get("followUpRequired"));
         String followUpQuestion = extractString(parsed.get("followUpQuestion"));
         return new EvaluationResult(score, feedback, followUpRequired, followUpQuestion);
+    }
+
+    private void recordInterviewEvaluationDecision(InterviewSessionDO session,
+                                                   InterviewTurnDO turn,
+                                                   String userId,
+                                                   Integer score,
+                                                   Map<String, Object> feedback,
+                                                   InterviewRuleBasedScore ruleScore) {
+        if (careerDecisionIndexService == null || session == null || turn == null) {
+            return;
+        }
+        try {
+            careerDecisionIndexService.record(CareerDecisionIndexCommand.builder()
+                    .traceId(session.getTraceId())
+                    .userId(userId)
+                    .businessScene(BusinessAgentScene.INTERVIEW.name())
+                    .businessId(session.getId())
+                    .agentType("INTERVIEW_EVALUATOR")
+                    .decisionType("INTERVIEW_EVALUATION")
+                    .decisionKey(session.getId() + ":turn-" + turn.getTurnNo())
+                    .decisionSummary("score=" + score + ", matchedRules=" + ruleScore.matchedRules())
+                    .inputRef(Map.of(
+                            "turnNo", turn.getTurnNo(),
+                            "questionChars", StrUtil.blankToDefault(turn.getQuestion(), "").length(),
+                            "answerChars", StrUtil.blankToDefault(turn.getAnswer(), "").length()))
+                    .outputRef(Map.of(
+                            "score", score,
+                            "missingPoints", feedback == null ? List.of() : toList(feedback.get("missingPoints")),
+                            "matchedRules", ruleScore.matchedRules()))
+                    .build());
+        } catch (RuntimeException ex) {
+            log.warn("记录面试评分决策索引失败，忽略索引写入：sessionId={}, turnNo={}",
+                    session.getId(), turn.getTurnNo(), ex);
+        }
     }
 
     /**
