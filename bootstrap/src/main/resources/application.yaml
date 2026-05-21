@@ -150,6 +150,7 @@ career:
       api-key: ${XUNFEI_TTS_API_KEY:}
       api-secret: ${XUNFEI_TTS_API_SECRET:}
       host: api-dx.xf-yun.com
+      endpoint-base-url: ${XUNFEI_TTS_ENDPOINT_BASE_URL:}
       create-path: /v1/private/dts_create
       query-path: /v1/private/dts_query
       language: zh
@@ -161,6 +162,7 @@ career:
       sample-rate: 16000
       timeout-seconds: 90
       poll-interval-millis: 1500
+      max-polls: 60
       max-text-chars: 100000
   demeanor:
     enabled: false

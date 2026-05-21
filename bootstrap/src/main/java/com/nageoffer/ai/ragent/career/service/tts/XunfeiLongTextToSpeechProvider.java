@@ -54,7 +54,9 @@ public class XunfeiLongTextToSpeechProvider implements CareerTextToSpeechProvide
         }
         long deadline = System.currentTimeMillis() + Math.max(10, config.getTimeoutSeconds()) * 1000L;
         TtsTask latest = task;
-        while (System.currentTimeMillis() < deadline) {
+        int pollCount = 0;
+        while (System.currentTimeMillis() < deadline && pollCount < Math.max(1, config.getMaxPolls())) {
+            pollCount++;
             latest = parseTask(postWithSign(config, config.getQueryPath(), buildQueryBody(config, task.taskId())));
             if ("5".equals(latest.taskStatus())) {
                 return CareerTextToSpeechProviderResult.success(latest.taskId(), latest.taskStatus(),
@@ -158,18 +160,36 @@ public class XunfeiLongTextToSpeechProvider implements CareerTextToSpeechProvide
                     config.getApiKey().trim(), signature);
             String authorization = Base64.getEncoder()
                     .encodeToString(authorizationOrigin.getBytes(StandardCharsets.UTF_8));
-            HttpUrl url = new HttpUrl.Builder()
-                    .scheme("https")
-                    .host(host)
-                    .encodedPath(path)
-                    .addQueryParameter("host", host)
-                    .addQueryParameter("date", date)
-                    .addQueryParameter("authorization", authorization)
-                    .build();
+            HttpUrl url = buildEndpointUrl(config, path, host, date, authorization);
             return new SignedRequest(url.toString(), date, authorization);
         } catch (Exception ex) {
             throw new ServiceException("Failed to build Xunfei TTS auth URL: " + ex.getMessage());
         }
+    }
+
+    private HttpUrl buildEndpointUrl(CareerTextToSpeechProperties.Xunfei config,
+                                     String path,
+                                     String host,
+                                     String date,
+                                     String authorization) {
+        HttpUrl.Builder builder;
+        if (StrUtil.isNotBlank(config.getEndpointBaseUrl())) {
+            HttpUrl baseUrl = HttpUrl.parse(config.getEndpointBaseUrl());
+            if (baseUrl == null) {
+                throw new ServiceException("Xunfei TTS endpoint base URL is invalid");
+            }
+            builder = baseUrl.newBuilder().encodedPath(path);
+        } else {
+            builder = new HttpUrl.Builder()
+                    .scheme("https")
+                    .host(host)
+                    .encodedPath(path);
+        }
+        return builder
+                .addQueryParameter("host", host)
+                .addQueryParameter("date", date)
+                .addQueryParameter("authorization", authorization)
+                .build();
     }
 
     private String hmacSha256Base64(String content, String secret) throws Exception {

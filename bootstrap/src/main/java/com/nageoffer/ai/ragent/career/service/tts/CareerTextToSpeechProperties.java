@@ -34,6 +34,8 @@ public class CareerTextToSpeechProperties {
 
         private String host = "api-dx.xf-yun.com";
 
+        private String endpointBaseUrl = "";
+
         private String createPath = "/v1/private/dts_create";
 
         private String queryPath = "/v1/private/dts_query";
@@ -55,6 +57,8 @@ public class CareerTextToSpeechProperties {
         private int timeoutSeconds = 90;
 
         private int pollIntervalMillis = 1500;
+
+        private int maxPolls = 60;
 
         private int maxTextChars = 100000;
     }

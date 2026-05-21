@@ -116,6 +116,11 @@
       "description": "Xunfei long-text TTS API host."
     },
     {
+      "name": "career.tts.xunfei.endpoint-base-url",
+      "type": "java.lang.String",
+      "description": "Optional full base URL override for Xunfei long-text TTS, mainly for private gateways or tests."
+    },
+    {
       "name": "career.tts.xunfei.create-path",
       "type": "java.lang.String",
       "description": "Xunfei long-text TTS task creation path."
@@ -139,6 +144,11 @@
       "name": "career.tts.xunfei.poll-interval-millis",
       "type": "java.lang.Integer",
       "description": "Polling interval for Xunfei long-text TTS task status."
+    },
+    {
+      "name": "career.tts.xunfei.max-polls",
+      "type": "java.lang.Integer",
+      "description": "Maximum polling attempts for Xunfei long-text TTS task status."
     },
     {
       "name": "career.tts.xunfei.max-text-chars",
