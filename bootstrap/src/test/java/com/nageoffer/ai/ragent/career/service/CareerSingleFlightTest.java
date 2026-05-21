@@ -340,6 +340,28 @@ class CareerSingleFlightTest {
     }
 
     @Test
+    void llmWrapperPersistsLargeAiResultWithoutTruncatingReplay() {
+        stubPersistence();
+        stubAttemptPersistence();
+        CareerSingleFlightLlmServiceImpl wrapper = newWrapper();
+        String largeResult = "large-result-".repeat(18_000);
+        when(llmService.chat(any(ChatRequest.class))).thenReturn(largeResult);
+        ChatRequest request = ChatRequest.builder()
+                .messages(List.of(ChatMessage.user("same large prompt")))
+                .temperature(0.1D)
+                .build();
+
+        String first = wrapper.chat("OPTIMIZATION_REVIEW", "same-large-key", "trace-large-1", request);
+        String replay = wrapper.chat("OPTIMIZATION_REVIEW", "same-large-key", "trace-large-2", request);
+
+        assertEquals(largeResult, first);
+        assertEquals(largeResult, replay);
+        assertTrue(records.get(0).getResultJson().contains("gzip-base64"));
+        assertTrue(records.get(0).getResultJson().length() < largeResult.length());
+        verify(llmService).chat(any(ChatRequest.class));
+    }
+
+    @Test
     void llmWrapperReadsLocalReplayBeforeSingleFlightService() {
         stubAttemptPersistence();
         CareerSingleFlightService service = mock(CareerSingleFlightService.class);

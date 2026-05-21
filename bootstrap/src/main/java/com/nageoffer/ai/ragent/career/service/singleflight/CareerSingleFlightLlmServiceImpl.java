@@ -34,21 +34,27 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.util.Base64;
 import java.util.HexFormat;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
 
 @Service
 @Slf4j
 public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmService {
 
     private static final int KEY_MAX_LENGTH = 200;
-    private static final int RESULT_MAX_LENGTH = 200_000;
+    private static final int RESULT_COMPRESSION_THRESHOLD = 200_000;
+    private static final String RESULT_ENCODING_GZIP_BASE64 = "gzip-base64";
 
     private final CareerSingleFlightService singleFlightService;
     private final LLMService llmService;
@@ -386,22 +392,18 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
     }
 
     /**
-     * 限制模型结果长度，避免 single-flight 回放字段过大。
-     */
-    private String limitResult(String result) {
-        if (result == null || result.length() <= RESULT_MAX_LENGTH) {
-            return result;
-        }
-        return result.substring(0, RESULT_MAX_LENGTH);
-    }
-
-    /**
      * 将模型结果包装成可回放 JSON，兼容空响应。
      */
     private String wrapResult(String result) {
         try {
             Map<String, Object> payload = new LinkedHashMap<>();
-            payload.put("response", limitResult(result));
+            if (result == null || result.length() <= RESULT_COMPRESSION_THRESHOLD) {
+                payload.put("response", result);
+            } else {
+                payload.put("encoding", RESULT_ENCODING_GZIP_BASE64);
+                payload.put("responseGzipBase64", gzipBase64(result));
+                payload.put("originalLength", result.length());
+            }
             return objectMapper.writeValueAsString(payload);
         } catch (Exception ex) {
             throw new ServiceException("Failed to serialize AI single-flight result");
@@ -417,13 +419,46 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
         }
         try {
             JsonNode root = objectMapper.readTree(resultJson);
+            JsonNode encoding = root.get("encoding");
+            if (encoding != null && RESULT_ENCODING_GZIP_BASE64.equals(encoding.asText())) {
+                JsonNode compressed = root.get("responseGzipBase64");
+                if (compressed == null || compressed.isNull()) {
+                    throw new ServiceException("AI single-flight gzip replay payload is missing");
+                }
+                return gunzipBase64(compressed.asText());
+            }
             JsonNode response = root.get("response");
             if (response == null) {
                 return resultJson;
             }
             return response.isNull() ? null : response.asText();
+        } catch (ServiceException ex) {
+            throw ex;
         } catch (Exception ex) {
             return resultJson;
+        }
+    }
+
+    private String gzipBase64(String value) {
+        try {
+            ByteArrayOutputStream output = new ByteArrayOutputStream();
+            try (GZIPOutputStream gzip = new GZIPOutputStream(output)) {
+                gzip.write(value.getBytes(StandardCharsets.UTF_8));
+            }
+            return Base64.getEncoder().encodeToString(output.toByteArray());
+        } catch (Exception ex) {
+            throw new ServiceException("Failed to gzip AI single-flight result");
+        }
+    }
+
+    private String gunzipBase64(String value) {
+        try {
+            byte[] compressed = Base64.getDecoder().decode(value);
+            try (GZIPInputStream gzip = new GZIPInputStream(new ByteArrayInputStream(compressed))) {
+                return new String(gzip.readAllBytes(), StandardCharsets.UTF_8);
+            }
+        } catch (Exception ex) {
+            throw new ServiceException("Failed to gunzip AI single-flight result");
         }
     }
 

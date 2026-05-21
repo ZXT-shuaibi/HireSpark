@@ -2,7 +2,7 @@
 
 ## 审核结论
 
-本轮已经把后融合计划中的 P1-P6 纳入 ragent 的统一底座：工程交付、OpenAPI、字体治理、混合压缩记忆、长文本 TTS、神态/表情分析和统一验收矩阵都有代码或文档锚点。当前没有发现仍应复制 AI-Meeting 或 JobNavigator 运行时的亮点。
+本轮已经把后融合计划中的 P1-P6 纳入 ragent 的统一底座：工程交付、OpenAPI、字体治理、混合压缩记忆、长文本 TTS、神态/表情分析和统一验收矩阵都有代码或文档锚点。复核后确认，TTS 与神态分析仍是可降级骨架而非真实供应商能力；Single-flight 主体已具备，但曾存在 200K+ 大结果硬截断风险，已在深度缺口阶段 1 中补齐 gzip 回放。
 
 ## 已引入亮点
 
@@ -15,15 +15,24 @@
 | 长文本 TTS | `CareerTextToSpeechService`、`/career/interviews/{sessionId}/tts/plan`、`CareerTextToSpeechServiceTest` | 已引入为可降级计划层 |
 | 神态/表情分析 | `CareerDemeanorAnalysisService`、`/career/interviews/{sessionId}/demeanor/analyze`、`CareerDemeanorAnalysisServiceTest` | 已引入为可关闭辅助信号 |
 | 统一验收矩阵 | `post-fusion-acceptance-matrix.md`、`scripts/verify_post_fusion_acceptance.py` | 已引入 |
+| Single-flight 大结果回放 | `CareerSingleFlightLlmServiceImpl`、`CareerSingleFlightTest.llmWrapperPersistsLargeAiResultWithoutTruncatingReplay` | 已补齐 gzip + Base64 完整回放 |
 
-## 仍未引入但不应直接搬入的内容
+## 仍未引入但需按深度计划补齐的内容
+
+| 项 | 当前状态 | 后续处理 |
+| --- | --- | --- |
+| 真实第三方 TTS 音频供应商调用 | 已有 TTS plan endpoint，尚未提交/轮询/下载真实音频 | 按 `deep-gap-development-plan.md` 阶段 2 接入 provider |
+| 真实神态/表情模型 | 已有授权与辅助信号边界，尚未图片上传和模型调用 | 按 `deep-gap-development-plan.md` 阶段 3 接入 provider |
+| 邮件验证码 | Auth 当前只有登录/登出 | 按阶段 4 增加验证码、TTL、频控和注册/找回密码校验 |
+| FollowUp 规则链配置化 | 已有节点式规则链，但不是 YAML/LiteFlow 热配置 | 按阶段 5 做配置顺序、启停和命中审计 |
+| RAG 双向 WebSocket | RAG 聊天仍是 SSE 单向 | 按阶段 6 作为可选通道接入 |
+
+## 仍未引入且不应直接搬入的内容
 
 | 项 | 原因 | 后续处理 |
 | --- | --- | --- |
 | 第二套认证、模型 SDK、Trace、前端 Shell | 违反 ragent 唯一运行底座原则 | 不引入 |
 | FreeMarker 默认模板链路 | 当前 Markdown 模板和字段映射已覆盖本轮验收，FreeMarker 仍是复杂模板后的可选升级 | 暂不引入 |
-| 真实第三方 TTS 音频供应商调用 | 本轮先建立切片、缓存、取消和降级契约，避免供应商耦合主流程 | 作为 provider adapter 独立接入 |
-| 真实神态/表情模型 | 涉及授权、隐私、模型误判和数据保留边界，本轮只建立合规辅助信号接口 | 在明确合规与模型来源后接入 |
 | 完整浏览器播放队列 UI | 后端已提供 TTS 计划，前端播放体验可独立迭代 | 后续体验任务 |
 
 ## 当前风险
@@ -31,6 +40,7 @@
 - Maven 本地验证仍受依赖缓存和网络授权限制影响。需要在可访问 Maven Central 或企业镜像的环境里运行完整测试。
 - TTS 和神态分析当前是平台契约与降级骨架，不包含外部音频/视觉模型供应商实现。
 - 神态分析结果必须保持 `includedInScore=false`，不得成为招聘或评分的唯一依据。
+- Single-flight 大结果已使用 gzip + Base64 回放，后续仍可补充错误分类枚举和压缩指标观测。
 
 ## 建议回归命令
 
