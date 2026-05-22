@@ -221,6 +221,66 @@
       "description": "Whether WebMagic job posting URL import is enabled."
     },
     {
+      "name": "career.xunfei.ocr.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether the Xunfei OCR HTTP provider is enabled."
+    },
+    {
+      "name": "career.xunfei.ocr.endpoint-base-url",
+      "type": "java.lang.String",
+      "description": "Optional base URL override for Xunfei OCR, mainly for private gateways or tests."
+    },
+    {
+      "name": "career.xunfei.ocr.path",
+      "type": "java.lang.String",
+      "description": "Xunfei OCR request path."
+    },
+    {
+      "name": "career.xunfei.ocr.max-image-bytes",
+      "type": "java.lang.Integer",
+      "description": "Maximum image size accepted by the Xunfei OCR provider."
+    },
+    {
+      "name": "career.xunfei.face-detect.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether the Xunfei face detection HTTP provider is enabled."
+    },
+    {
+      "name": "career.xunfei.face-detect.endpoint-base-url",
+      "type": "java.lang.String",
+      "description": "Optional base URL override for Xunfei face detection."
+    },
+    {
+      "name": "career.xunfei.face-detect.path",
+      "type": "java.lang.String",
+      "description": "Xunfei face detection request path."
+    },
+    {
+      "name": "career.xunfei.face-detect.max-image-bytes",
+      "type": "java.lang.Integer",
+      "description": "Maximum image size accepted by the Xunfei face detection provider."
+    },
+    {
+      "name": "career.xunfei.nlp.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether the Xunfei NLP HTTP provider is enabled."
+    },
+    {
+      "name": "career.xunfei.nlp.endpoint-base-url",
+      "type": "java.lang.String",
+      "description": "Optional base URL override for Xunfei NLP."
+    },
+    {
+      "name": "career.xunfei.nlp.path",
+      "type": "java.lang.String",
+      "description": "Xunfei NLP request path."
+    },
+    {
+      "name": "career.xunfei.nlp.max-text-chars",
+      "type": "java.lang.Integer",
+      "description": "Maximum text length accepted by the Xunfei NLP provider."
+    },
+    {
       "name": "career.voice.xunfei-iat.enabled",
       "type": "java.lang.Boolean",
       "description": "Whether the Xunfei Spark IAT file transcription agent is enabled."
@@ -259,6 +319,21 @@
       "name": "ragent.cache.bloom.enabled",
       "type": "java.lang.Boolean",
       "description": "Whether the Redisson RBloomFilter cache penetration guard is enabled."
+    },
+    {
+      "name": "ragent.datasource.dynamic.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether dynamic data source routing annotations and routing context should be enabled."
+    },
+    {
+      "name": "ragent.datasource.dynamic.primary",
+      "type": "java.lang.String",
+      "description": "Default lookup key used by DynamicRoutingDataSource when no context data source is selected."
+    },
+    {
+      "name": "ragent.datasource.dynamic.strict",
+      "type": "java.lang.Boolean",
+      "description": "Reserved flag for rejecting unknown data source names when full dynamic registration is enabled."
     },
     {
       "name": "ragent.cache.bloom.name",

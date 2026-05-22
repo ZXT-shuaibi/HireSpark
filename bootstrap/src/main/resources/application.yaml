@@ -190,6 +190,40 @@ career:
   crawler:
     webmagic:
       enabled: true
+  xunfei:
+    ocr:
+      enabled: false
+      app-id: ${XUNFEI_OCR_APP_ID:}
+      api-key: ${XUNFEI_OCR_API_KEY:}
+      api-secret: ${XUNFEI_OCR_API_SECRET:}
+      host: ${XUNFEI_OCR_HOST:api.xf-yun.com}
+      endpoint-base-url: ${XUNFEI_OCR_ENDPOINT_BASE_URL:}
+      path: ${XUNFEI_OCR_PATH:/v1/private/ocr}
+      service: ${XUNFEI_OCR_SERVICE:ocr}
+      timeout-seconds: 30
+      max-image-bytes: 5242880
+    face-detect:
+      enabled: false
+      app-id: ${XUNFEI_FACE_APP_ID:}
+      api-key: ${XUNFEI_FACE_API_KEY:}
+      api-secret: ${XUNFEI_FACE_API_SECRET:}
+      host: ${XUNFEI_FACE_HOST:api.xf-yun.com}
+      endpoint-base-url: ${XUNFEI_FACE_ENDPOINT_BASE_URL:}
+      path: ${XUNFEI_FACE_PATH:/v1/private/face_detect}
+      service: ${XUNFEI_FACE_SERVICE:face_detect}
+      timeout-seconds: 30
+      max-image-bytes: 5242880
+    nlp:
+      enabled: false
+      app-id: ${XUNFEI_NLP_APP_ID:}
+      api-key: ${XUNFEI_NLP_API_KEY:}
+      api-secret: ${XUNFEI_NLP_API_SECRET:}
+      host: ${XUNFEI_NLP_HOST:api.xf-yun.com}
+      endpoint-base-url: ${XUNFEI_NLP_ENDPOINT_BASE_URL:}
+      path: ${XUNFEI_NLP_PATH:/v1/private/nlp}
+      service: ${XUNFEI_NLP_SERVICE:nlp}
+      timeout-seconds: 30
+      max-text-chars: 20000
   render:
     font:
       enabled: true
@@ -339,6 +373,12 @@ app:
   demo-mode: false
 
 ragent:
+  datasource:
+    dynamic:
+      enabled: false
+      primary: primary
+      strict: false
+      data-sources: {}
   cache:
     bloom:
       enabled: false
