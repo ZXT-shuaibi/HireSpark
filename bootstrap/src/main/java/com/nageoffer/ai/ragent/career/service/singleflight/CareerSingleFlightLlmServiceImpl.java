@@ -469,8 +469,7 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
      * 提取异常类型名称，供 single-flight 失败记录使用。
      */
     private String errorType(RuntimeException ex) {
-        String name = ex.getClass().getSimpleName();
-        return StrUtil.blankToDefault(name, "AI_CALL_FAILED");
+        return FlightErrorType.from(ex).code();
     }
 
     /**
