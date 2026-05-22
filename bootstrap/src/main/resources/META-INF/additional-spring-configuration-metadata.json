@@ -221,6 +221,36 @@
       "description": "Whether WebMagic job posting URL import is enabled."
     },
     {
+      "name": "career.resume.ocr.max-pdf-pages",
+      "type": "java.lang.Integer",
+      "description": "Maximum PDF pages rendered to images for resume OCR fallback."
+    },
+    {
+      "name": "core.crawler.webmagic.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether the generic WebMagic crawler agent is enabled for knowledge URL imports."
+    },
+    {
+      "name": "core.crawler.webmagic.respect-robots-txt",
+      "type": "java.lang.Boolean",
+      "description": "Whether generic WebMagic crawler requests should mark robots-aware crawling policy."
+    },
+    {
+      "name": "core.crawler.webmagic.max-text-length",
+      "type": "java.lang.Integer",
+      "description": "Maximum readable text characters kept from a crawled web page."
+    },
+    {
+      "name": "core.crawler.webmagic.min-host-interval-millis",
+      "type": "java.lang.Long",
+      "description": "Minimum interval between generic crawler requests for the same host."
+    },
+    {
+      "name": "core.crawler.webmagic.user-agent",
+      "type": "java.lang.String",
+      "description": "User-Agent used by the generic WebMagic crawler agent."
+    },
+    {
       "name": "career.xunfei.ocr.enabled",
       "type": "java.lang.Boolean",
       "description": "Whether the Xunfei OCR HTTP provider is enabled."

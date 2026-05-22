@@ -2,7 +2,6 @@ package com.nageoffer.ai.ragent.career.service.demeanor;
 
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
-import com.nageoffer.ai.ragent.framework.exception.ServiceException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
@@ -20,20 +19,40 @@ public class CareerDemeanorAnalysisService {
 
     private final CareerDemeanorAnalysisProvider provider;
 
+    private final DemeanorFaceDetectProvider faceDetectProvider;
+
+    private final DemeanorNormalizationStrategy normalizationStrategy;
+
     public CareerDemeanorAnalysisService(CareerDemeanorAnalysisProperties properties) {
-        this(properties, (CareerDemeanorAnalysisProvider) null);
+        this(properties, (CareerDemeanorAnalysisProvider) null, null, new DemeanorNormalizationStrategy());
     }
 
     @Autowired
     public CareerDemeanorAnalysisService(CareerDemeanorAnalysisProperties properties,
-                                         ObjectProvider<CareerDemeanorAnalysisProvider> provider) {
-        this(properties, provider == null ? null : provider.getIfAvailable());
+                                         ObjectProvider<CareerDemeanorAnalysisProvider> provider,
+                                         ObjectProvider<DemeanorFaceDetectProvider> faceDetectProvider,
+                                         ObjectProvider<DemeanorNormalizationStrategy> normalizationStrategy) {
+        this(properties,
+                provider == null ? null : provider.getIfAvailable(),
+                faceDetectProvider == null ? null : faceDetectProvider.getIfAvailable(),
+                normalizationStrategy == null ? null : normalizationStrategy.getIfAvailable());
     }
 
     public CareerDemeanorAnalysisService(CareerDemeanorAnalysisProperties properties,
                                          CareerDemeanorAnalysisProvider provider) {
+        this(properties, provider, null, new DemeanorNormalizationStrategy());
+    }
+
+    public CareerDemeanorAnalysisService(CareerDemeanorAnalysisProperties properties,
+                                         CareerDemeanorAnalysisProvider provider,
+                                         DemeanorFaceDetectProvider faceDetectProvider,
+                                         DemeanorNormalizationStrategy normalizationStrategy) {
         this.properties = properties == null ? new CareerDemeanorAnalysisProperties() : properties;
         this.provider = provider;
+        this.faceDetectProvider = faceDetectProvider;
+        this.normalizationStrategy = normalizationStrategy == null
+                ? new DemeanorNormalizationStrategy()
+                : normalizationStrategy;
     }
 
     public CareerDemeanorAnalysisResult analyze(CareerDemeanorAnalysisRequest request) {
@@ -43,7 +62,7 @@ public class CareerDemeanorAnalysisService {
         if (request == null || !request.consentGranted()) {
             return disabled("CONSENT_REQUIRED");
         }
-        if (provider != null && hasImage(request)) {
+        if (hasVisualAnalyzer(request)) {
             return analyzeWithProvider(request);
         }
         List<CareerDemeanorObservation> observations = request.observations() == null
@@ -71,44 +90,68 @@ public class CareerDemeanorAnalysisService {
     }
 
     private CareerDemeanorAnalysisResult analyzeWithProvider(CareerDemeanorAnalysisRequest request) {
-        try {
-            CareerDemeanorAnalysisProviderResult providerResult = provider.analyze(
-                    new CareerDemeanorAnalysisProviderRequest(
-                            request.sessionId(),
-                            request.imageUrl(),
-                            request.imageBase64(),
-                            request.sampledAt(),
-                            request.observations() == null ? List.of() : request.observations()));
-            int compositeScore = normalizeScore(providerResult == null ? null : providerResult.compositeScore());
-            double confidence = BigDecimal.valueOf(compositeScore / 100D)
-                    .setScale(2, RoundingMode.HALF_UP)
-                    .doubleValue();
-            List<String> signals = new ArrayList<>();
-            if (providerResult != null && providerResult.signals() != null) {
-                providerResult.signals().stream()
-                        .filter(StrUtil::isNotBlank)
-                        .map(String::trim)
-                        .distinct()
-                        .forEach(signals::add);
+        CareerDemeanorAnalysisProviderResult providerResult = null;
+        DemeanorFaceSignal faceSignal = null;
+        List<String> failures = new ArrayList<>();
+        if (provider != null && hasImage(request)) {
+            try {
+                providerResult = provider.analyze(
+                        new CareerDemeanorAnalysisProviderRequest(
+                                request.sessionId(),
+                                request.imageUrl(),
+                                request.imageBase64(),
+                                request.sampledAt(),
+                                request.observations() == null ? List.of() : request.observations()));
+            } catch (Exception ex) {
+                failures.add(providerFailureMessage(ex));
             }
-            signals.add("composite-score:" + compositeScore);
-            return new CareerDemeanorAnalysisResult(true, "AUXILIARY_READY", false, confidence,
-                    signals, properties.getLimitations(), properties.getRetentionPolicy());
-        } catch (Exception ex) {
-            return new CareerDemeanorAnalysisResult(false, "PROVIDER_UNAVAILABLE", false, 0D,
-                    List.of(providerFailureMessage(ex)), properties.getLimitations(), properties.getRetentionPolicy());
         }
+        if (faceDetectProvider != null && StrUtil.isNotBlank(request.imageBase64())) {
+            try {
+                faceSignal = faceDetectProvider.detect(new DemeanorFaceDetectRequest(
+                        request.imageBase64(),
+                        imageFormat(request.imageBase64()),
+                        "career-demeanor-face-" + StrUtil.blankToDefault(request.sessionId(), "session")));
+            } catch (Exception ex) {
+                failures.add(providerFailureMessage(ex));
+            }
+        }
+        if (providerResult == null && faceSignal == null) {
+            if (!failures.isEmpty()) {
+                return new CareerDemeanorAnalysisResult(false, "PROVIDER_UNAVAILABLE", false, 0D,
+                        failures, properties.getLimitations(), properties.getRetentionPolicy());
+            }
+            return new CareerDemeanorAnalysisResult(true, "NO_SIGNAL", false, 0D,
+                    List.of(), properties.getLimitations(), properties.getRetentionPolicy());
+        }
+        DemeanorNormalizedResult normalized = normalizationStrategy.normalize(
+                providerResult,
+                faceSignal,
+                request.observations() == null ? List.of() : request.observations());
+        return new CareerDemeanorAnalysisResult(true, "AUXILIARY_READY", false, normalized.confidence(),
+                normalized.signals(), properties.getLimitations(), properties.getRetentionPolicy());
     }
 
     private boolean hasImage(CareerDemeanorAnalysisRequest request) {
         return request != null && (StrUtil.isNotBlank(request.imageUrl()) || StrUtil.isNotBlank(request.imageBase64()));
     }
 
-    private int normalizeScore(Integer score) {
-        if (score == null) {
-            throw new ServiceException("Demeanor provider response missing composite score");
+    private boolean hasVisualAnalyzer(CareerDemeanorAnalysisRequest request) {
+        return request != null && hasImage(request)
+                && (provider != null || (faceDetectProvider != null && StrUtil.isNotBlank(request.imageBase64())));
+    }
+
+    private String imageFormat(String imageBase64) {
+        String value = StrUtil.blankToDefault(imageBase64, "").trim();
+        if (value.startsWith("data:image/")) {
+            int slash = value.indexOf('/');
+            int semicolon = value.indexOf(';');
+            if (slash >= 0 && semicolon > slash) {
+                String format = value.substring(slash + 1, semicolon);
+                return "jpeg".equals(format) ? "jpg" : format;
+            }
         }
-        return Math.max(0, Math.min(100, score));
+        return "png";
     }
 
     private String providerFailureMessage(Exception ex) {

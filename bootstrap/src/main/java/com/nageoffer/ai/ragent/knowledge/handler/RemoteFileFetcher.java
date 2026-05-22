@@ -19,23 +19,32 @@ package com.nageoffer.ai.ragent.knowledge.handler;
 
 import com.nageoffer.ai.ragent.framework.exception.ClientException;
 import com.nageoffer.ai.ragent.framework.exception.ServiceException;
+import com.nageoffer.ai.ragent.core.crawler.WebPageCrawlRequest;
+import com.nageoffer.ai.ragent.core.crawler.WebPageCrawlResult;
+import com.nageoffer.ai.ragent.core.crawler.WebPageCrawlerAgent;
 import com.nageoffer.ai.ragent.ingestion.util.HttpClientHelper;
 import com.nageoffer.ai.ragent.rag.dto.StoredFileDTO;
 import com.nageoffer.ai.ragent.rag.service.FileStorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.util.unit.DataSize;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.net.URI;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -49,9 +58,15 @@ public class RemoteFileFetcher {
 
     private final HttpClientHelper httpClientHelper;
     private final FileStorageService fileStorageService;
+    private WebPageCrawlerAgent webPageCrawlerAgent;
 
     @Value("${spring.servlet.multipart.max-file-size:50MB}")
     private DataSize maxFileSize;
+
+    @Autowired(required = false)
+    public void setWebPageCrawlerAgent(WebPageCrawlerAgent webPageCrawlerAgent) {
+        this.webPageCrawlerAgent = webPageCrawlerAgent;
+    }
 
     /**
      * 流式拉取远程文件并上传到存储（用于文档上传场景）
@@ -63,6 +78,11 @@ public class RemoteFileFetcher {
         Long headContentLength = headResponse == null ? null : headResponse.contentLength();
         checkSizeLimit(maxBytes, headContentLength);
 
+        StoredFileDTO crawledPage = fetchWebPageAsMarkdownIfPossible(bucketName, url, headResponse);
+        if (crawledPage != null) {
+            return crawledPage;
+        }
+
         try (HttpClientHelper.HttpFetchStream response = httpClientHelper.openStream(url, Map.of(), maxBytes)) {
             String fileName = firstHasText(response.fileName(), headResponse == null ? null : headResponse.fileName(), "remote-file");
             String contentType = firstHasText(response.contentType(), headResponse == null ? null : headResponse.contentType(), null);
@@ -70,6 +90,82 @@ public class RemoteFileFetcher {
             // 远程导入统一先落临时文件，以实际读取到的字节数作为上传大小
             return uploadViaTemp(bucketName, response.bodyStream(), fileName, contentType, maxBytes);
         }
+    }
+
+    private StoredFileDTO fetchWebPageAsMarkdownIfPossible(String bucketName, String url,
+                                                           HttpClientHelper.HttpHeadResponse headResponse) {
+        if (webPageCrawlerAgent == null || !shouldCrawlAsWebPage(url, headResponse)) {
+            return null;
+        }
+        try {
+            WebPageCrawlResult page = webPageCrawlerAgent.crawl(new WebPageCrawlRequest(url, 50000, true, 500L));
+            if (page == null || !StringUtils.hasText(page.text())) {
+                return null;
+            }
+            byte[] content = webPageMarkdown(page).getBytes(StandardCharsets.UTF_8);
+            return fileStorageService.upload(bucketName,
+                    new ByteArrayInputStream(content),
+                    content.length,
+                    webPageFileName(url, page),
+                    "text/markdown;charset=UTF-8");
+        } catch (RuntimeException ex) {
+            log.warn("WebMagic knowledge crawler failed, falling back to remote file fetch: {}", url, ex);
+            return null;
+        }
+    }
+
+    private boolean shouldCrawlAsWebPage(String url, HttpClientHelper.HttpHeadResponse headResponse) {
+        String contentType = headResponse == null ? null : headResponse.contentType();
+        if (StringUtils.hasText(contentType) && contentType.toLowerCase(Locale.ROOT).contains("text/html")) {
+            return true;
+        }
+        String fileName = headResponse == null ? null : headResponse.fileName();
+        if (StringUtils.hasText(fileName)) {
+            String lower = fileName.toLowerCase(Locale.ROOT);
+            return lower.endsWith(".html") || lower.endsWith(".htm");
+        }
+        return false;
+    }
+
+    private String webPageMarkdown(WebPageCrawlResult page) {
+        StringBuilder builder = new StringBuilder();
+        builder.append("# ").append(firstHasText(page.title(), "Untitled Web Page")).append("\n\n");
+        builder.append("Source URL: ").append(page.url()).append("\n\n");
+        builder.append(page.text()).append("\n");
+        List<String> links = page.links() == null ? List.of() : page.links();
+        if (!links.isEmpty()) {
+            builder.append("\n## Links\n");
+            links.stream().limit(50).forEach(link -> builder.append("- ").append(link).append("\n"));
+        }
+        return builder.toString();
+    }
+
+    private String webPageFileName(String url, WebPageCrawlResult page) {
+        String host = "web-page";
+        String slug = null;
+        try {
+            URI uri = URI.create(url);
+            if (StringUtils.hasText(uri.getHost())) {
+                host = uri.getHost().replace('.', '-');
+            }
+            String path = uri.getPath();
+            if (StringUtils.hasText(path)) {
+                String[] parts = path.split("/");
+                slug = parts.length == 0 ? null : parts[parts.length - 1];
+            }
+        } catch (Exception ignored) {
+            slug = page == null ? null : page.title();
+        }
+        String token = safeToken(host + "-" + firstHasText(slug, page == null ? null : page.title(), "page"));
+        return token + ".md";
+    }
+
+    private String safeToken(String value) {
+        String token = firstHasText(value, "web-page").toLowerCase(Locale.ROOT)
+                .replaceAll("[^a-z0-9._-]+", "-")
+                .replaceAll("-+", "-")
+                .replaceAll("^-|-$", "");
+        return StringUtils.hasText(token) ? token : "web-page";
     }
 
     /**

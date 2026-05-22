@@ -35,6 +35,7 @@ import com.nageoffer.ai.ragent.career.dao.mapper.JobAlignmentReportMapper;
 import com.nageoffer.ai.ragent.career.dao.mapper.JobDescriptionMapper;
 import com.nageoffer.ai.ragent.career.dao.mapper.ResumeVersionMapper;
 import com.nageoffer.ai.ragent.career.service.JobAlignmentService;
+import com.nageoffer.ai.ragent.career.service.nlp.CareerNlpEnrichmentService;
 import com.nageoffer.ai.ragent.career.service.parser.CareerJsonParser;
 import com.nageoffer.ai.ragent.career.service.prompt.CareerPromptTemplates;
 import com.nageoffer.ai.ragent.career.service.retrieval.CareerRetrievalEnhancement;
@@ -81,10 +82,16 @@ public class JobAlignmentServiceImpl implements JobAlignmentService {
     private final CareerRetrievalEnhancementService careerRetrievalEnhancementService;
     private final ObjectMapper objectMapper = new ObjectMapper();
     private JobPostingCrawler jobPostingCrawler;
+    private CareerNlpEnrichmentService careerNlpEnrichmentService;
 
     @Autowired(required = false)
     public void setJobPostingCrawler(JobPostingCrawler jobPostingCrawler) {
         this.jobPostingCrawler = jobPostingCrawler;
+    }
+
+    @Autowired(required = false)
+    public void setCareerNlpEnrichmentService(CareerNlpEnrichmentService careerNlpEnrichmentService) {
+        this.careerNlpEnrichmentService = careerNlpEnrichmentService;
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -105,6 +112,7 @@ public class JobAlignmentServiceImpl implements JobAlignmentService {
                 .thinking(false)
                 .build());
         Map<String, Object> parsed = careerJsonParser.parseObject(response);
+        enrichWithNlp(parsed, CareerNlpEnrichmentService.SCENE_JD_PARSE, rawText, traceId);
 
         JobDescriptionDO job = JobDescriptionDO.builder()
                 .userId(userId)
@@ -434,6 +442,16 @@ public class JobAlignmentServiceImpl implements JobAlignmentService {
         return prompt + "\n\nCareer retrieval evidence JSON:\n"
                 + writeJson(enhancement.toPromptPayload(), "Failed to serialize retrieval evidence JSON")
                 + "\nRules: HYDE_QUERY evidence is QUERY_ONLY. Use it for retrieval context only; never treat it as resume fact.";
+    }
+
+    private void enrichWithNlp(Map<String, Object> payload, String scene, String text, String traceId) {
+        if (payload == null || careerNlpEnrichmentService == null) {
+            return;
+        }
+        Map<String, Object> nlp = careerNlpEnrichmentService.enrich(scene, text, traceId);
+        if (!nlp.isEmpty()) {
+            payload.put(CareerNlpEnrichmentService.PAYLOAD_KEY, nlp);
+        }
     }
 
     private String buildSingleFlightKey(String scene, String userId, String artifactId, String prompt) {

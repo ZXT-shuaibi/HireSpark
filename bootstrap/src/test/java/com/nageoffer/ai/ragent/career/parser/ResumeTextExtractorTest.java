@@ -18,12 +18,20 @@
 package com.nageoffer.ai.ragent.career.parser;
 
 import com.nageoffer.ai.ragent.career.service.parser.ResumeTextExtractor;
+import com.nageoffer.ai.ragent.career.service.ocr.ResumeOcrRequest;
+import com.nageoffer.ai.ragent.career.service.ocr.ResumeOcrResult;
 import com.nageoffer.ai.ragent.framework.exception.ClientException;
+import org.apache.pdfbox.pdmodel.PDDocument;
+import org.apache.pdfbox.pdmodel.PDPage;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
 
+import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 
 class ResumeTextExtractorTest {
 
@@ -71,5 +79,56 @@ class ResumeTextExtractorTest {
                 () -> extractor.extract(file)
         );
         Assertions.assertEquals("Resume text is empty", ex.getMessage());
+    }
+
+    @Test
+    void fallsBackToOcrForImageResumeWhenTikaExtractsNoText() {
+        AtomicReference<ResumeOcrRequest> capturedRequest = new AtomicReference<>();
+        ResumeTextExtractor imageExtractor = new ResumeTextExtractor(request -> {
+            capturedRequest.set(request);
+            return new ResumeOcrResult("王小明 Java 后端工程师", List.of("王小明", "Java 后端工程师"),
+                    "test-ocr", "trace-ocr");
+        });
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "resume.png",
+                "image/png",
+                new byte[]{1, 2, 3, 4}
+        );
+
+        Assertions.assertEquals("王小明 Java 后端工程师", imageExtractor.extract(file));
+        Assertions.assertNotNull(capturedRequest.get());
+        Assertions.assertEquals("png", capturedRequest.get().imageFormat());
+        Assertions.assertEquals("resume.png", capturedRequest.get().sourceName());
+        Assertions.assertArrayEquals(new byte[]{1, 2, 3, 4}, capturedRequest.get().imageBytes());
+    }
+
+    @Test
+    void rendersPdfPagesForOcrWhenPdfHasNoEmbeddedText() throws IOException {
+        AtomicReference<ResumeOcrRequest> capturedRequest = new AtomicReference<>();
+        ResumeTextExtractor pdfExtractor = new ResumeTextExtractor(request -> {
+            capturedRequest.set(request);
+            return new ResumeOcrResult("扫描版 PDF 简历", List.of("扫描版 PDF 简历"), "test-ocr", "trace-ocr");
+        });
+        MockMultipartFile file = new MockMultipartFile(
+                "file",
+                "resume.pdf",
+                "application/pdf",
+                blankPdf()
+        );
+
+        Assertions.assertEquals("扫描版 PDF 简历", pdfExtractor.extract(file));
+        Assertions.assertNotNull(capturedRequest.get());
+        Assertions.assertEquals("png", capturedRequest.get().imageFormat());
+        Assertions.assertEquals(1, capturedRequest.get().pageNumber());
+        Assertions.assertEquals("resume.pdf", capturedRequest.get().sourceName());
+    }
+
+    private byte[] blankPdf() throws IOException {
+        try (PDDocument document = new PDDocument(); ByteArrayOutputStream outputStream = new ByteArrayOutputStream()) {
+            document.addPage(new PDPage());
+            document.save(outputStream);
+            return outputStream.toByteArray();
+        }
     }
 }

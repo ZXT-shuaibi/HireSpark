@@ -30,6 +30,8 @@ import com.nageoffer.ai.ragent.career.dao.mapper.JobAlignmentReportMapper;
 import com.nageoffer.ai.ragent.career.dao.mapper.JobDescriptionMapper;
 import com.nageoffer.ai.ragent.career.dao.mapper.ResumeVersionMapper;
 import com.nageoffer.ai.ragent.career.service.impl.JobAlignmentServiceImpl;
+import com.nageoffer.ai.ragent.career.service.nlp.CareerNlpAnalysisResult;
+import com.nageoffer.ai.ragent.career.service.nlp.CareerNlpEnrichmentService;
 import com.nageoffer.ai.ragent.career.service.parser.CareerJsonParser;
 import com.nageoffer.ai.ragent.career.service.retrieval.CareerRetrievalEnhancement;
 import com.nageoffer.ai.ragent.career.service.retrieval.CareerRetrievalEnhancementService;
@@ -51,6 +53,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import java.util.List;
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -182,6 +185,29 @@ class JobAlignmentScoringTest {
         assertTrue(job.getCompany().length() <= 128);
         assertTrue(job.getSourceType().length() <= 32);
         assertTrue(job.getSourceLocation().length() <= 512);
+    }
+
+    @Test
+    void createJobPersistsNlpEnrichmentIntoParsedJsonWhenProviderAvailable() {
+        UserContext.set(LoginUser.builder().userId("user-1").username("alice").build());
+        CareerJobCreateRequest request = new CareerJobCreateRequest();
+        request.setRawText("This Java backend role requires Spring Boot, Redis, PostgreSQL and RAG platform skills.");
+        when(singleFlightLlmService.chat(anyString(), anyString(), anyString(), any(ChatRequest.class)))
+                .thenReturn("{}");
+        when(careerJsonParser.parseObject(anyString())).thenReturn(new LinkedHashMap<>(Map.of(
+                "title", "Java Backend Engineer")));
+        JobAlignmentServiceImpl service = newService();
+        service.setCareerNlpEnrichmentService(new CareerNlpEnrichmentService(
+                nlpRequest -> new CareerNlpAnalysisResult("xunfei-nlp", "sid-jd",
+                        List.of("Spring Boot", "RAG"), List.of("PostgreSQL"), "neutral")));
+
+        service.createJob(request);
+
+        ArgumentCaptor<JobDescriptionDO> jobCaptor = ArgumentCaptor.forClass(JobDescriptionDO.class);
+        verify(jobDescriptionMapper).insert(jobCaptor.capture());
+        assertTrue(jobCaptor.getValue().getParsedJson().contains("\"xunfeiNlp\""));
+        assertTrue(jobCaptor.getValue().getParsedJson().contains("Spring Boot"));
+        assertTrue(jobCaptor.getValue().getParsedJson().contains("PostgreSQL"));
     }
 
     @Test

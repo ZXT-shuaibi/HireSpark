@@ -1,18 +1,19 @@
 package com.nageoffer.ai.ragent.career.service.export;
 
 import cn.hutool.core.util.StrUtil;
-import com.alibaba.excel.EasyExcel;
-import com.alibaba.excel.ExcelWriter;
-import com.alibaba.excel.write.metadata.WriteSheet;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nageoffer.ai.ragent.career.dao.entity.InterviewReportDO;
 import com.nageoffer.ai.ragent.career.dao.entity.JobAlignmentReportDO;
+import com.nageoffer.ai.ragent.core.export.excel.EasyExcelWorkbookExportAgent;
+import com.nageoffer.ai.ragent.core.export.excel.ExcelSheetData;
+import com.nageoffer.ai.ragent.core.export.excel.ExcelWorkbookExportAgent;
+import com.nageoffer.ai.ragent.core.export.excel.ExcelWorkbookRequest;
 import com.nageoffer.ai.ragent.framework.exception.ServiceException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
-import java.io.ByteArrayOutputStream;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -26,6 +27,18 @@ public class EasyExcelCareerExcelExportAgent implements CareerExcelExportAgent {
     };
 
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private final ExcelWorkbookExportAgent workbookExportAgent;
+
+    public EasyExcelCareerExcelExportAgent() {
+        this(new EasyExcelWorkbookExportAgent());
+    }
+
+    @Autowired
+    public EasyExcelCareerExcelExportAgent(ExcelWorkbookExportAgent workbookExportAgent) {
+        this.workbookExportAgent = workbookExportAgent == null
+                ? new EasyExcelWorkbookExportAgent()
+                : workbookExportAgent;
+    }
 
     @Override
     public CareerExcelExportResult exportAlignmentReport(JobAlignmentReportDO report) {
@@ -61,18 +74,9 @@ public class EasyExcelCareerExcelExportAgent implements CareerExcelExportAgent {
                 content);
     }
 
-    private byte[] writeWorkbook(List<SheetData> sheets) {
-        ByteArrayOutputStream outputStream = new ByteArrayOutputStream();
-        try (ExcelWriter writer = EasyExcel.write(outputStream).autoCloseStream(false).build()) {
-            for (int index = 0; index < sheets.size(); index++) {
-                SheetData sheet = sheets.get(index);
-                WriteSheet writeSheet = EasyExcel.writerSheet(index, sheet.name())
-                        .head(sheet.head())
-                        .build();
-                writer.write(sheet.rows(), writeSheet);
-            }
-            writer.finish();
-            return outputStream.toByteArray();
+    private byte[] writeWorkbook(List<ExcelSheetData> sheets) {
+        try {
+            return workbookExportAgent.export(new ExcelWorkbookRequest("career-report.xlsx", sheets)).content();
         } catch (Exception ex) {
             throw new ServiceException("Failed to export career report Excel: " + ex.getMessage());
         }
@@ -165,8 +169,8 @@ public class EasyExcelCareerExcelExportAgent implements CareerExcelExportAgent {
         return List.of(List.of("Index"), List.of("Key"), List.of("Value"));
     }
 
-    private SheetData sheet(String name, List<List<String>> rows, List<List<String>> head) {
-        return new SheetData(name, rows, head);
+    private ExcelSheetData sheet(String name, List<List<String>> rows, List<List<String>> head) {
+        return new ExcelSheetData(name, head, rows);
     }
 
     private String safeToken(String value) {
@@ -180,6 +184,4 @@ public class EasyExcelCareerExcelExportAgent implements CareerExcelExportAgent {
         return value == null ? "" : String.valueOf(value);
     }
 
-    private record SheetData(String name, List<List<String>> rows, List<List<String>> head) {
-    }
 }

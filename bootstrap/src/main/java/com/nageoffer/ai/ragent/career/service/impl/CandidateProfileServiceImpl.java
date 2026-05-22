@@ -34,6 +34,7 @@ import com.nageoffer.ai.ragent.career.dao.mapper.ResumeDocumentMapper;
 import com.nageoffer.ai.ragent.career.dao.mapper.ResumeExportRecordMapper;
 import com.nageoffer.ai.ragent.career.dao.mapper.ResumeVersionMapper;
 import com.nageoffer.ai.ragent.career.service.CandidateProfileService;
+import com.nageoffer.ai.ragent.career.service.nlp.CareerNlpEnrichmentService;
 import com.nageoffer.ai.ragent.career.service.parser.CareerJsonParser;
 import com.nageoffer.ai.ragent.career.service.parser.ResumeTextExtractor;
 import com.nageoffer.ai.ragent.career.service.prompt.CareerPromptTemplates;
@@ -52,6 +53,7 @@ import com.nageoffer.ai.ragent.rag.util.FileTypeDetector;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
@@ -92,9 +94,15 @@ public class CandidateProfileServiceImpl implements CandidateProfileService {
     private final FileStorageService fileStorageService;
     private final ResumeRenderPipeline resumeRenderPipeline;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private CareerNlpEnrichmentService careerNlpEnrichmentService;
 
     @Value("${career.storage.export-bucket:career-resume-export}")
     private String exportBucketName = "career-resume-export";
+
+    @Autowired(required = false)
+    public void setCareerNlpEnrichmentService(CareerNlpEnrichmentService careerNlpEnrichmentService) {
+        this.careerNlpEnrichmentService = careerNlpEnrichmentService;
+    }
 
     @Override
     @Transactional(rollbackFor = Exception.class)
@@ -119,11 +127,13 @@ public class CandidateProfileServiceImpl implements CandidateProfileService {
                     .temperature(0.1D)
                     .thinking(false)
                     .build();
+            String traceId = "career-resume-parse-" + document.getId();
             String response = singleFlightLlmService.chat("RESUME_PARSE",
                     buildSingleFlightKey("RESUME_PARSE", userId, document.getId(), rawText),
-                    "career-resume-parse-" + document.getId(),
+                    traceId,
                     chatRequest);
             Map<String, Object> resumeJson = careerJsonParser.parseObject(response);
+            enrichWithNlp(resumeJson, CareerNlpEnrichmentService.SCENE_RESUME_PARSE, rawText, traceId);
             String contentJson = writeJson(resumeJson);
 
             CandidateProfileDO profile = upsertProfile(userId, resumeJson, contentJson);
@@ -472,6 +482,16 @@ public class CandidateProfileServiceImpl implements CandidateProfileService {
         payload.put("templateVersion", validation.templateVersion());
         payload.put("traceId", validation.traceId());
         return payload;
+    }
+
+    private void enrichWithNlp(Map<String, Object> payload, String scene, String text, String traceId) {
+        if (payload == null || careerNlpEnrichmentService == null) {
+            return;
+        }
+        Map<String, Object> nlp = careerNlpEnrichmentService.enrich(scene, text, traceId);
+        if (!nlp.isEmpty()) {
+            payload.put(CareerNlpEnrichmentService.PAYLOAD_KEY, nlp);
+        }
     }
 
     private String normalizeContentJson(String contentJson) {

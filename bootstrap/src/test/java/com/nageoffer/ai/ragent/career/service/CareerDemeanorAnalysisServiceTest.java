@@ -5,6 +5,8 @@ import com.nageoffer.ai.ragent.career.service.demeanor.CareerDemeanorAnalysisReq
 import com.nageoffer.ai.ragent.career.service.demeanor.CareerDemeanorAnalysisProviderResult;
 import com.nageoffer.ai.ragent.career.service.demeanor.CareerDemeanorAnalysisService;
 import com.nageoffer.ai.ragent.career.service.demeanor.CareerDemeanorObservation;
+import com.nageoffer.ai.ragent.career.service.demeanor.DemeanorFaceSignal;
+import com.nageoffer.ai.ragent.career.service.demeanor.DemeanorNormalizationStrategy;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -69,6 +71,32 @@ class CareerDemeanorAnalysisServiceTest {
         assertThat(result.confidence()).isEqualTo(0.88D);
         assertThat(result.signals()).contains("stable-eye-contact", "calm-expression", "composite-score:88");
         assertThat(sampledAt).hasValue("2026-05-21T17:00:00+08:00");
+    }
+
+    @Test
+    void visualDemeanorAnalysisFusesXingChenAndFaceDetectSignals() {
+        CareerDemeanorAnalysisProperties properties = new CareerDemeanorAnalysisProperties();
+        properties.setEnabled(true);
+        CareerDemeanorAnalysisService service = new CareerDemeanorAnalysisService(properties,
+                request -> new CareerDemeanorAnalysisProviderResult(
+                        10, 70, 80, 80, List.of("stable-eye-contact"), "workflow-ok"),
+                request -> new DemeanorFaceSignal("xunfei-face-detect", "sid-face", 1, "calm", 0.72D),
+                new DemeanorNormalizationStrategy());
+
+        var result = service.analyze(new CareerDemeanorAnalysisRequest("session-1", true,
+                List.of(new CareerDemeanorObservation("steady-voice", 0.6D, "voice was stable")),
+                "", "data:image/png;base64,AAE=", "2026-05-21T17:00:00+08:00"));
+
+        assertThat(result.enabled()).isTrue();
+        assertThat(result.status()).isEqualTo("AUXILIARY_READY");
+        assertThat(result.includedInScore()).isFalse();
+        assertThat(result.confidence()).isEqualTo(0.76D);
+        assertThat(result.signals()).contains(
+                "stable-eye-contact",
+                "composite-score:80",
+                "face-count:1",
+                "face-emotion:calm-expression",
+                "face-confidence:0.72");
     }
 
     @Test

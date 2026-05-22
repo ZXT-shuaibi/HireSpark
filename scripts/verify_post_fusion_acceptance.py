@@ -60,6 +60,38 @@ CHECKS = {
         "docs/career-agent-platform/post-fusion-gap-audit.md",
         ["已引入", "仍未引入", "真实第三方 TTS", "真实神态/表情模型"],
     ),
+    "P0 Xunfei vendor matrix": (
+        "docs/career-agent-platform/xunfei-vendor-integration-matrix.md",
+        ["Long Text TTS", "XingChen Demeanor", "OCR", "FaceDetect", "NLP", "failure-code-map"],
+    ),
+    "P0 Xunfei sample responses": (
+        "docs/examples/xunfei/failure-code-map.json",
+        ["TTS_AUTH_FAILED", "XINGCHEN_WORKFLOW_TIMEOUT", "OCR_EMPTY_TEXT", "FACE_NO_FACE", "NLP_EMPTY_RESULT"],
+    ),
+    "P0 Xunfei sanitized provider samples": (
+        "docs/examples/xunfei/sanitized-provider-samples.json",
+        ["longTextTts", "xingChenDemeanor", "ocr", "faceDetect", "nlp"],
+    ),
+    "P1 OCR resume hook": (
+        "bootstrap/src/main/java/com/nageoffer/ai/ragent/career/service/parser/ResumeTextExtractor.java",
+        ["ResumeOcrProvider", "renderPdfPagesForOcr", "imageFormat"],
+    ),
+    "P1 demeanor normalization": (
+        "bootstrap/src/main/java/com/nageoffer/ai/ragent/career/service/demeanor/DemeanorNormalizationStrategy.java",
+        ["face-emotion", "composite-score", "normalize"],
+    ),
+    "P1 NLP business hook": (
+        "bootstrap/src/main/java/com/nageoffer/ai/ragent/career/service/nlp/CareerNlpEnrichmentService.java",
+        ["JD_PARSE", "RESUME_PARSE", "INTERVIEW_REPORT", "xunfeiNlp"],
+    ),
+    "P2 generic crawler agent": (
+        "bootstrap/src/main/java/com/nageoffer/ai/ragent/core/crawler/WebMagicWebPageCrawlerAgent.java",
+        ["robots", "rate", "knowledge"],
+    ),
+    "P2 generic Excel agent": (
+        "bootstrap/src/main/java/com/nageoffer/ai/ragent/core/export/excel/EasyExcelWorkbookExportAgent.java",
+        ["ExcelWorkbookExportAgent", "ExcelWorkbookRequest", "writerSheet"],
+    ),
 }
 
 

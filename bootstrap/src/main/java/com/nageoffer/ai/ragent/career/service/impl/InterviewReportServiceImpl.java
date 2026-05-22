@@ -27,6 +27,7 @@ import com.nageoffer.ai.ragent.career.dao.mapper.InterviewReportMapper;
 import com.nageoffer.ai.ragent.career.dao.mapper.InterviewSessionMapper;
 import com.nageoffer.ai.ragent.career.dao.mapper.InterviewTurnMapper;
 import com.nageoffer.ai.ragent.career.service.InterviewReportService;
+import com.nageoffer.ai.ragent.career.service.nlp.CareerNlpEnrichmentService;
 import com.nageoffer.ai.ragent.career.service.prompt.CareerPromptTemplates;
 import com.nageoffer.ai.ragent.career.service.report.CareerRadarComputationService;
 import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightLlmService;
@@ -35,6 +36,7 @@ import com.nageoffer.ai.ragent.framework.convention.ChatMessage;
 import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
 import com.nageoffer.ai.ragent.framework.exception.ClientException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -52,6 +54,12 @@ public class InterviewReportServiceImpl implements InterviewReportService {
     private final InterviewReportSupport interviewReportSupport;
     private final CareerSingleFlightLlmService singleFlightLlmService;
     private final CareerRadarComputationService careerRadarComputationService;
+    private CareerNlpEnrichmentService careerNlpEnrichmentService;
+
+    @Autowired(required = false)
+    public void setCareerNlpEnrichmentService(CareerNlpEnrichmentService careerNlpEnrichmentService) {
+        this.careerNlpEnrichmentService = careerNlpEnrichmentService;
+    }
 
     @Transactional(rollbackFor = Exception.class)
     @Override
@@ -90,6 +98,7 @@ public class InterviewReportServiceImpl implements InterviewReportService {
             overallScore = averageScore;
             suggestions = interviewReportSupport.appendFallbackMarker(suggestions, averageScore);
         }
+        suggestions = appendNlpSuggestion(suggestions, turnsJson, traceId);
 
         InterviewReportDO report = InterviewReportDO.builder()
                 .sessionId(session.getId())
@@ -154,6 +163,23 @@ public class InterviewReportServiceImpl implements InterviewReportService {
         return turns.stream()
                 .filter(turn -> turn.getScore() != null)
                 .toList();
+    }
+
+    private List<Object> appendNlpSuggestion(List<Object> suggestions, String turnsJson, String traceId) {
+        if (careerNlpEnrichmentService == null) {
+            return suggestions;
+        }
+        Map<String, Object> nlp = careerNlpEnrichmentService.enrich(
+                CareerNlpEnrichmentService.SCENE_INTERVIEW_REPORT, turnsJson, traceId);
+        if (nlp.isEmpty()) {
+            return suggestions;
+        }
+        List<Object> merged = new ArrayList<>(suggestions == null ? List.of() : suggestions);
+        merged.add(Map.of(
+                "type", CareerNlpEnrichmentService.PAYLOAD_KEY,
+                "title", "NLP auxiliary signals",
+                "payload", nlp));
+        return merged;
     }
 
     private String requireUserId() {
