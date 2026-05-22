@@ -336,6 +336,12 @@ app:
   demo-mode: false
 
 ragent:
+  cache:
+    bloom:
+      enabled: false
+      name: ragent:bloom:default
+      expected-insertions: 1000000
+      false-probability: 0.01
   auth:
     sms:
       provider: ${RAGENT_AUTH_SMS_PROVIDER:logging}

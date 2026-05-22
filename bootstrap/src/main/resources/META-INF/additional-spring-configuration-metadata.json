@@ -251,6 +251,26 @@
       "description": "Maximum audio file size accepted by the file transcription agent."
     },
     {
+      "name": "ragent.cache.bloom.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether the Redisson RBloomFilter cache penetration guard is enabled."
+    },
+    {
+      "name": "ragent.cache.bloom.name",
+      "type": "java.lang.String",
+      "description": "Redis bloom filter name used by the cache penetration guard."
+    },
+    {
+      "name": "ragent.cache.bloom.expected-insertions",
+      "type": "java.lang.Long",
+      "description": "Expected insertion count used when initializing RBloomFilter."
+    },
+    {
+      "name": "ragent.cache.bloom.false-probability",
+      "type": "java.lang.Double",
+      "description": "False positive probability used when initializing RBloomFilter."
+    },
+    {
       "name": "ragent.auth.sms.provider",
       "type": "java.lang.String",
       "description": "SMS verification sender provider. Use logging for local development or aliyun for Aliyun SMS."
