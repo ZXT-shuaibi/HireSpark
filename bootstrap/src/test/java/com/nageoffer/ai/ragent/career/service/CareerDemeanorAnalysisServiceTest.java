@@ -6,7 +6,8 @@ import com.nageoffer.ai.ragent.career.service.demeanor.CareerDemeanorAnalysisPro
 import com.nageoffer.ai.ragent.career.service.demeanor.CareerDemeanorAnalysisService;
 import com.nageoffer.ai.ragent.career.service.demeanor.CareerDemeanorObservation;
 import com.nageoffer.ai.ragent.career.service.demeanor.DemeanorFaceSignal;
-import com.nageoffer.ai.ragent.career.service.demeanor.DemeanorNormalizationStrategy;
+import com.nageoffer.ai.ragent.career.service.demeanor.CompositeDemeanorNormalizationStrategy;
+import com.nageoffer.ai.ragent.career.service.demeanor.DemeanorSignal;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -81,7 +82,7 @@ class CareerDemeanorAnalysisServiceTest {
                 request -> new CareerDemeanorAnalysisProviderResult(
                         10, 70, 80, 80, List.of("stable-eye-contact"), "workflow-ok"),
                 request -> new DemeanorFaceSignal("xunfei-face-detect", "sid-face", 1, "calm", 0.72D),
-                new DemeanorNormalizationStrategy());
+                new CompositeDemeanorNormalizationStrategy());
 
         var result = service.analyze(new CareerDemeanorAnalysisRequest("session-1", true,
                 List.of(new CareerDemeanorObservation("steady-voice", 0.6D, "voice was stable")),
@@ -90,13 +91,21 @@ class CareerDemeanorAnalysisServiceTest {
         assertThat(result.enabled()).isTrue();
         assertThat(result.status()).isEqualTo("AUXILIARY_READY");
         assertThat(result.includedInScore()).isFalse();
-        assertThat(result.confidence()).isEqualTo(0.76D);
+        assertThat(result.confidence()).isEqualTo(0.77D);
         assertThat(result.signals()).contains(
                 "stable-eye-contact",
                 "composite-score:80",
                 "face-count:1",
                 "face-emotion:calm-expression",
                 "face-confidence:0.72");
+        assertThat(result.structuredSignals()).contains(
+                new DemeanorSignal("XINGCHEN_WORKFLOW", "workflow-signal", "stable-eye-contact", null, null),
+                new DemeanorSignal("XINGCHEN_WORKFLOW", "composite-score", "composite-score:80", 80D, null),
+                new DemeanorSignal("FACE_DETECT", "face-count", "face-count:1", 1D, "xunfei-face-detect"),
+                new DemeanorSignal("FACE_DETECT", "expression", "face-emotion:calm-expression", null,
+                        "xunfei-face-detect"),
+                new DemeanorSignal("FACE_DETECT", "confidence", "face-confidence:0.72", 72D,
+                        "xunfei-face-detect"));
     }
 
     @Test

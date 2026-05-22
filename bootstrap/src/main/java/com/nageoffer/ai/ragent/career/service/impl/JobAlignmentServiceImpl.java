@@ -53,6 +53,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -197,10 +198,13 @@ public class JobAlignmentServiceImpl implements JobAlignmentService {
 
         CareerRetrievalEnhancement enhancement =
                 careerRetrievalEnhancementService.enhanceAlignment(resumeVersion, job);
-        String prompt = appendRetrievalEvidence(
-                String.format(CareerPromptTemplates.JD_ALIGNMENT, resumeVersion.getContentJson(), job.getParsedJson()),
-                enhancement);
         String traceId = "career-alignment-" + resumeVersion.getId() + "-" + job.getId();
+        String prompt = appendRetrievalEvidence(
+                appendNlpContext(
+                        String.format(CareerPromptTemplates.JD_ALIGNMENT,
+                                resumeVersion.getContentJson(), job.getParsedJson()),
+                        buildAlignmentNlpContext(resumeVersion, job, traceId)),
+                enhancement);
         String response = singleFlightLlmService.chat("JD_ALIGNMENT",
                 buildSingleFlightKey("JD_ALIGNMENT", userId, resumeVersion.getId() + ":" + job.getId(), prompt),
                 traceId,
@@ -454,6 +458,39 @@ public class JobAlignmentServiceImpl implements JobAlignmentService {
         return prompt + "\n\nCareer retrieval evidence JSON:\n"
                 + writeJson(enhancement.toPromptPayload(), "Failed to serialize retrieval evidence JSON")
                 + "\nRules: HYDE_QUERY evidence is QUERY_ONLY. Use it for retrieval context only; never treat it as resume fact.";
+    }
+
+    private String appendNlpContext(String prompt, Map<String, Object> nlpContext) {
+        if (nlpContext == null || nlpContext.isEmpty()) {
+            return prompt;
+        }
+        return prompt + "\n\ncareerNlpContext JSON:\n"
+                + writeJson(Map.of("careerNlpContext", nlpContext), "Failed to serialize NLP context JSON")
+                + "\nRules: NLP keywords/entities are auxiliary extraction signals. Use them to focus comparison, not as new facts.";
+    }
+
+    private Map<String, Object> buildAlignmentNlpContext(ResumeVersionDO resumeVersion,
+                                                         JobDescriptionDO job,
+                                                         String traceId) {
+        if (careerNlpEnrichmentService == null) {
+            return Map.of();
+        }
+        Map<String, Object> context = new LinkedHashMap<>();
+        Map<String, Object> resumeNlp = careerNlpEnrichmentService.enrich(
+                CareerNlpEnrichmentService.SCENE_ALIGNMENT_RESUME,
+                firstNotBlank(resumeVersion.getMarkdownContent(), resumeVersion.getContentJson()),
+                traceId + "-resume-nlp");
+        Map<String, Object> jdNlp = careerNlpEnrichmentService.enrich(
+                CareerNlpEnrichmentService.SCENE_ALIGNMENT_JD,
+                firstNotBlank(job.getRawText(), job.getParsedJson()),
+                traceId + "-jd-nlp");
+        if (!resumeNlp.isEmpty()) {
+            context.put("resumeNlp", resumeNlp);
+        }
+        if (!jdNlp.isEmpty()) {
+            context.put("jdNlp", jdNlp);
+        }
+        return context;
     }
 
     private void validateCrawledJdContent(String rawText) {

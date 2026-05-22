@@ -6,8 +6,6 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Service;
 
-import java.math.BigDecimal;
-import java.math.RoundingMode;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
@@ -24,7 +22,7 @@ public class CareerDemeanorAnalysisService {
     private final DemeanorNormalizationStrategy normalizationStrategy;
 
     public CareerDemeanorAnalysisService(CareerDemeanorAnalysisProperties properties) {
-        this(properties, (CareerDemeanorAnalysisProvider) null, null, new DemeanorNormalizationStrategy());
+        this(properties, (CareerDemeanorAnalysisProvider) null, null, new CompositeDemeanorNormalizationStrategy());
     }
 
     @Autowired
@@ -40,7 +38,7 @@ public class CareerDemeanorAnalysisService {
 
     public CareerDemeanorAnalysisService(CareerDemeanorAnalysisProperties properties,
                                          CareerDemeanorAnalysisProvider provider) {
-        this(properties, provider, null, new DemeanorNormalizationStrategy());
+        this(properties, provider, null, new CompositeDemeanorNormalizationStrategy());
     }
 
     public CareerDemeanorAnalysisService(CareerDemeanorAnalysisProperties properties,
@@ -51,7 +49,7 @@ public class CareerDemeanorAnalysisService {
         this.provider = provider;
         this.faceDetectProvider = faceDetectProvider;
         this.normalizationStrategy = normalizationStrategy == null
-                ? new DemeanorNormalizationStrategy()
+                ? new CompositeDemeanorNormalizationStrategy()
                 : normalizationStrategy;
     }
 
@@ -78,15 +76,10 @@ public class CareerDemeanorAnalysisService {
             return new CareerDemeanorAnalysisResult(true, "NO_SIGNAL", false, 0D,
                     List.of(), properties.getLimitations(), properties.getRetentionPolicy());
         }
-        double confidence = observations.stream()
-                .map(CareerDemeanorObservation::confidence)
-                .filter(value -> value != null && value >= 0D)
-                .mapToDouble(value -> Math.min(1D, value))
-                .average()
-                .orElse(0D);
-        double rounded = BigDecimal.valueOf(confidence).setScale(2, RoundingMode.HALF_UP).doubleValue();
-        return new CareerDemeanorAnalysisResult(true, "AUXILIARY_READY", false, rounded,
-                signals, properties.getLimitations(), properties.getRetentionPolicy());
+        DemeanorNormalizedResult normalized = normalizationStrategy.normalize(null, null, observations);
+        return new CareerDemeanorAnalysisResult(true, "AUXILIARY_READY", false, normalized.confidence(),
+                normalized.signals(), normalized.structuredSignals(),
+                properties.getLimitations(), properties.getRetentionPolicy());
     }
 
     private CareerDemeanorAnalysisResult analyzeWithProvider(CareerDemeanorAnalysisRequest request) {
@@ -129,7 +122,8 @@ public class CareerDemeanorAnalysisService {
                 faceSignal,
                 request.observations() == null ? List.of() : request.observations());
         return new CareerDemeanorAnalysisResult(true, "AUXILIARY_READY", false, normalized.confidence(),
-                normalized.signals(), properties.getLimitations(), properties.getRetentionPolicy());
+                normalized.signals(), normalized.structuredSignals(),
+                properties.getLimitations(), properties.getRetentionPolicy());
     }
 
     private boolean hasImage(CareerDemeanorAnalysisRequest request) {

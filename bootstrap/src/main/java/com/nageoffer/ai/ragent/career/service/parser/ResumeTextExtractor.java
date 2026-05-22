@@ -72,19 +72,25 @@ public class ResumeTextExtractor {
     }
 
     public String extract(MultipartFile file) {
+        return extractWithMetadata(file).text();
+    }
+
+    public ResumeTextExtractionResult extractWithMetadata(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             throw new ClientException("Resume file is empty");
         }
         try {
             byte[] content = file.getBytes();
             String text = extractByTika(content);
+            String contentSource = ResumeTextExtractionResult.SOURCE_TIKA;
             if (text == null || text.trim().isEmpty()) {
                 text = extractByOcr(file, content);
+                contentSource = ResumeTextExtractionResult.SOURCE_OCR_ENHANCED;
             }
             if (StrUtil.isBlank(text)) {
                 throw new ClientException("Resume text is empty");
             }
-            return text.trim();
+            return new ResumeTextExtractionResult(text.trim(), contentSource);
         } catch (ClientException ex) {
             throw ex;
         } catch (Exception ex) {

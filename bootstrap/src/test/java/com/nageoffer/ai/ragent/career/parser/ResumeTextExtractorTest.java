@@ -18,6 +18,7 @@
 package com.nageoffer.ai.ragent.career.parser;
 
 import com.nageoffer.ai.ragent.career.service.parser.ResumeTextExtractor;
+import com.nageoffer.ai.ragent.career.service.parser.ResumeTextExtractionResult;
 import com.nageoffer.ai.ragent.career.service.ocr.ResumeOcrRequest;
 import com.nageoffer.ai.ragent.career.service.ocr.ResumeOcrResult;
 import com.nageoffer.ai.ragent.framework.exception.ClientException;
@@ -47,6 +48,9 @@ class ResumeTextExtractorTest {
         );
 
         Assertions.assertEquals("Java backend engineer", extractor.extract(file));
+        ResumeTextExtractionResult result = extractor.extractWithMetadata(file);
+        Assertions.assertEquals("Java backend engineer", result.text());
+        Assertions.assertEquals("TIKA", result.contentSource());
     }
 
     @Test
@@ -101,6 +105,7 @@ class ResumeTextExtractorTest {
         Assertions.assertEquals("png", capturedRequest.get().imageFormat());
         Assertions.assertEquals("resume.png", capturedRequest.get().sourceName());
         Assertions.assertArrayEquals(new byte[]{1, 2, 3, 4}, capturedRequest.get().imageBytes());
+        Assertions.assertEquals("OCR_ENHANCED", imageExtractor.extractWithMetadata(file).contentSource());
     }
 
     @Test

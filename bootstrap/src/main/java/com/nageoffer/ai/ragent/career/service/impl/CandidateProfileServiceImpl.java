@@ -37,6 +37,7 @@ import com.nageoffer.ai.ragent.career.service.CandidateProfileService;
 import com.nageoffer.ai.ragent.career.service.nlp.CareerNlpEnrichmentService;
 import com.nageoffer.ai.ragent.career.service.parser.CareerJsonParser;
 import com.nageoffer.ai.ragent.career.service.parser.ResumeTextExtractor;
+import com.nageoffer.ai.ragent.career.service.parser.ResumeTextExtractionResult;
 import com.nageoffer.ai.ragent.career.service.prompt.CareerPromptTemplates;
 import com.nageoffer.ai.ragent.career.service.render.ResumeRenderOutput;
 import com.nageoffer.ai.ragent.career.service.render.ResumeRenderPipeline;
@@ -108,7 +109,8 @@ public class CandidateProfileServiceImpl implements CandidateProfileService {
     @Transactional(rollbackFor = Exception.class)
     public CareerResumeUploadVO uploadAndParse(MultipartFile file) {
         String userId = requireUserId();
-        String rawText = resumeTextExtractor.extract(file);
+        ResumeTextExtractionResult extraction = resumeTextExtractor.extractWithMetadata(file);
+        String rawText = extraction.text();
         ResumeDocumentDO document = ResumeDocumentDO.builder()
                 .userId(userId)
                 .originalName(file.getOriginalFilename())
@@ -132,7 +134,10 @@ public class CandidateProfileServiceImpl implements CandidateProfileService {
                     buildSingleFlightKey("RESUME_PARSE", userId, document.getId(), rawText),
                     traceId,
                     chatRequest);
-            Map<String, Object> resumeJson = careerJsonParser.parseObject(response);
+            Map<String, Object> resumeJson = new LinkedHashMap<>(
+                    Objects.requireNonNullElse(careerJsonParser.parseObject(response), Map.of()));
+            resumeJson.put("contentSource", StrUtil.blankToDefault(
+                    extraction.contentSource(), ResumeTextExtractionResult.SOURCE_TIKA));
             enrichWithNlp(resumeJson, CareerNlpEnrichmentService.SCENE_RESUME_PARSE, rawText, traceId);
             String contentJson = writeJson(resumeJson);
 

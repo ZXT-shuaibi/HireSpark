@@ -211,6 +211,53 @@ class JobAlignmentScoringTest {
     }
 
     @Test
+    void alignAddsResumeAndJobNlpContextToPromptWhenProviderAvailable() {
+        UserContext.set(LoginUser.builder().userId("user-1").username("alice").build());
+        ResumeVersionDO resume = ResumeVersionDO.builder()
+                .id("resume-1")
+                .userId("user-1")
+                .contentJson("{\"skills\":[\"Redis\"]}")
+                .markdownContent("Built Redis and Spring Boot services.")
+                .build();
+        JobDescriptionDO job = JobDescriptionDO.builder()
+                .id("jd-1")
+                .userId("user-1")
+                .parsedJson("{\"requiredSkills\":[\"Kafka\"]}")
+                .rawText("Responsibilities include Kafka platform reliability.")
+                .build();
+        when(resumeVersionMapper.selectOne(anyResumeVersionWrapper())).thenReturn(resume);
+        when(jobDescriptionMapper.selectOne(anyJobDescriptionWrapper())).thenReturn(job);
+        when(careerRetrievalEnhancementService.enhanceAlignment(any(ResumeVersionDO.class), any(JobDescriptionDO.class)))
+                .thenReturn(defaultEnhancement());
+        when(singleFlightLlmService.chat(anyString(), anyString(), anyString(), any(ChatRequest.class)))
+                .thenReturn("{\"score\":88}");
+        when(careerJsonParser.parseObject(anyString())).thenReturn(alignmentJson(88));
+        doAnswer(invocation -> {
+            JobAlignmentReportDO report = invocation.getArgument(0);
+            report.setId("report-nlp");
+            return 1;
+        }).when(jobAlignmentReportMapper).insert(any(JobAlignmentReportDO.class));
+        JobAlignmentServiceImpl service = newService();
+        service.setCareerNlpEnrichmentService(new CareerNlpEnrichmentService(
+                nlpRequest -> nlpRequest.scene().contains("JD")
+                        ? new CareerNlpAnalysisResult("xunfei-nlp", "sid-jd",
+                        List.of("Kafka"), List.of("platform reliability"), "neutral")
+                        : new CareerNlpAnalysisResult("xunfei-nlp", "sid-resume",
+                        List.of("Redis", "Spring Boot"), List.of("services"), "positive")));
+
+        service.align(alignmentRequest());
+
+        ArgumentCaptor<ChatRequest> chatRequestCaptor = ArgumentCaptor.forClass(ChatRequest.class);
+        verify(singleFlightLlmService).chat(anyString(), anyString(), anyString(), chatRequestCaptor.capture());
+        String prompt = chatRequestCaptor.getValue().getMessages().get(0).getContent();
+        assertTrue(prompt.contains("careerNlpContext"));
+        assertTrue(prompt.contains("jdNlp"));
+        assertTrue(prompt.contains("resumeNlp"));
+        assertTrue(prompt.contains("Kafka"));
+        assertTrue(prompt.contains("Redis"));
+    }
+
+    @Test
     void alignRejectsMissingResumeVersionScopedByCurrentUser() {
         UserContext.set(LoginUser.builder().userId("user-1").username("alice").build());
         when(resumeVersionMapper.selectOne(anyResumeVersionWrapper())).thenReturn(null);

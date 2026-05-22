@@ -15,6 +15,10 @@ public class CareerNlpEnrichmentService {
     public static final String PAYLOAD_KEY = "xunfeiNlp";
     public static final String SCENE_JD_PARSE = "JD_PARSE";
     public static final String SCENE_RESUME_PARSE = "RESUME_PARSE";
+    public static final String SCENE_ALIGNMENT_JD = "JD_ALIGNMENT_JD";
+    public static final String SCENE_ALIGNMENT_RESUME = "JD_ALIGNMENT_RESUME";
+    public static final String SCENE_OPTIMIZATION_JD = "RESUME_OPTIMIZATION_JD";
+    public static final String SCENE_OPTIMIZATION_RESUME = "RESUME_OPTIMIZATION_RESUME";
     public static final String SCENE_INTERVIEW_REPORT = "INTERVIEW_REPORT";
 
     private final CareerNlpProvider provider;

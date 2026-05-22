@@ -47,6 +47,7 @@ import com.nageoffer.ai.ragent.career.enums.OptimizationReviewStatus;
 import com.nageoffer.ai.ragent.career.enums.ResumeSuggestionStatus;
 import com.nageoffer.ai.ragent.career.service.ResumeOptimizationService;
 import com.nageoffer.ai.ragent.career.service.ResumeOptimizationReviewEvaluator;
+import com.nageoffer.ai.ragent.career.service.nlp.CareerNlpEnrichmentService;
 import com.nageoffer.ai.ragent.career.service.parser.CareerJsonParser;
 import com.nageoffer.ai.ragent.career.service.prompt.CareerPromptTemplates;
 import com.nageoffer.ai.ragent.career.service.progress.CareerProgressStreamService;
@@ -61,6 +62,7 @@ import com.nageoffer.ai.ragent.framework.exception.ClientException;
 import com.nageoffer.ai.ragent.framework.exception.ServiceException;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -102,6 +104,12 @@ public class ResumeOptimizationServiceImpl implements ResumeOptimizationService 
     private final CareerProgressStreamService careerProgressStreamService;
     private final ResumeOptimizationReviewEvaluator reviewEvaluator = new ResumeOptimizationReviewEvaluator();
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private CareerNlpEnrichmentService careerNlpEnrichmentService;
+
+    @Autowired(required = false)
+    public void setCareerNlpEnrichmentService(CareerNlpEnrichmentService careerNlpEnrichmentService) {
+        this.careerNlpEnrichmentService = careerNlpEnrichmentService;
+    }
 
     /**
      * 创建简历优化任务，并通过执行者-裁判多轮迭代完成质量门禁。
@@ -457,7 +465,9 @@ public class ResumeOptimizationServiceImpl implements ResumeOptimizationService 
                                              CareerRetrievalEnhancement retrievalEnhancement,
                                              Map<String, Object> previousReviewerOutput,
                                              int iterationNo) {
-        String prompt = buildPrompt(resumeVersion, job, alignmentReport, retrievalEnhancement, previousReviewerOutput);
+        String prompt = appendNlpContext(
+                buildPrompt(resumeVersion, job, alignmentReport, retrievalEnhancement, previousReviewerOutput),
+                buildOptimizationNlpContext(resumeVersion, job, task.getTraceId()));
         String response = singleFlightLlmService.chat("OPTIMIZATION_EXECUTOR",
                 buildSingleFlightKey("OPTIMIZATION_EXECUTOR", task.getUserId(), task.getId(),
                         iterationNo + ":" + prompt),
@@ -541,13 +551,14 @@ public class ResumeOptimizationServiceImpl implements ResumeOptimizationService 
         String alignmentJson = alignmentReport == null
                 ? "{}"
                 : writeJson(buildAlignmentReportPayload(alignmentReport), "Failed to serialize alignment report JSON");
-        String reviewerPrompt = appendRetrievalEvidence(String.format(
-                CareerPromptTemplates.RESUME_OPTIMIZATION_REVIEW,
-                defaultJson(resumeVersion.getContentJson()),
-                job == null ? "{}" : defaultJson(job.getParsedJson()),
-                alignmentJson,
-                writeJson(executorOutput, "Failed to serialize optimization executor JSON")
-        ), retrievalEnhancement);
+        String reviewerPrompt = appendRetrievalEvidence(appendNlpContext(String.format(
+                        CareerPromptTemplates.RESUME_OPTIMIZATION_REVIEW,
+                        defaultJson(resumeVersion.getContentJson()),
+                        job == null ? "{}" : defaultJson(job.getParsedJson()),
+                        alignmentJson,
+                        writeJson(executorOutput, "Failed to serialize optimization executor JSON")
+                ), buildOptimizationNlpContext(resumeVersion, job, task.getTraceId())),
+                retrievalEnhancement);
         String reviewerResponse = singleFlightLlmService.chat("OPTIMIZATION_REVIEW",
                 buildSingleFlightKey("OPTIMIZATION_REVIEW", task.getUserId(), task.getId(), reviewerPrompt),
                 task.getTraceId(),
@@ -996,6 +1007,43 @@ public class ResumeOptimizationServiceImpl implements ResumeOptimizationService 
         return prompt + "\n\nCareer retrieval evidence JSON:\n"
                 + writeJson(enhancement.toPromptPayload(), "Failed to serialize retrieval evidence JSON")
                 + "\nRules: HYDE_QUERY evidence is QUERY_ONLY and must never be copied into resume content, suggestedText, or markdown.";
+    }
+
+    private String appendNlpContext(String prompt, Map<String, Object> nlpContext) {
+        if (nlpContext == null || nlpContext.isEmpty()) {
+            return prompt;
+        }
+        return prompt + "\n\ncareerNlpContext JSON:\n"
+                + writeJson(Map.of("careerNlpContext", nlpContext), "Failed to serialize NLP context JSON")
+                + "\nRules: NLP keywords/entities are auxiliary extraction signals. Use them to focus edits, not as new resume facts.";
+    }
+
+    private Map<String, Object> buildOptimizationNlpContext(ResumeVersionDO resumeVersion,
+                                                            JobDescriptionDO job,
+                                                            String traceId) {
+        if (careerNlpEnrichmentService == null || resumeVersion == null) {
+            return Map.of();
+        }
+        Map<String, Object> context = new LinkedHashMap<>();
+        Map<String, Object> resumeNlp = careerNlpEnrichmentService.enrich(
+                CareerNlpEnrichmentService.SCENE_OPTIMIZATION_RESUME,
+                StrUtil.isNotBlank(resumeVersion.getMarkdownContent())
+                        ? resumeVersion.getMarkdownContent()
+                        : resumeVersion.getContentJson(),
+                StrUtil.blankToDefault(traceId, "career-opt") + "-resume-nlp");
+        Map<String, Object> jdNlp = job == null
+                ? Map.of()
+                : careerNlpEnrichmentService.enrich(
+                CareerNlpEnrichmentService.SCENE_OPTIMIZATION_JD,
+                StrUtil.isNotBlank(job.getRawText()) ? job.getRawText() : job.getParsedJson(),
+                StrUtil.blankToDefault(traceId, "career-opt") + "-jd-nlp");
+        if (!resumeNlp.isEmpty()) {
+            context.put("resumeNlp", resumeNlp);
+        }
+        if (!jdNlp.isEmpty()) {
+            context.put("jdNlp", jdNlp);
+        }
+        return context;
     }
 
     private String buildOptimizedTitle(String title) {

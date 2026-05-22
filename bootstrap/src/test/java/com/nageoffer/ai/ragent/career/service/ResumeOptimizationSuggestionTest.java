@@ -42,6 +42,8 @@ import com.nageoffer.ai.ragent.career.enums.CareerTaskStatus;
 import com.nageoffer.ai.ragent.career.enums.OptimizationReviewStatus;
 import com.nageoffer.ai.ragent.career.enums.ResumeSuggestionStatus;
 import com.nageoffer.ai.ragent.career.service.impl.ResumeOptimizationServiceImpl;
+import com.nageoffer.ai.ragent.career.service.nlp.CareerNlpAnalysisResult;
+import com.nageoffer.ai.ragent.career.service.nlp.CareerNlpEnrichmentService;
 import com.nageoffer.ai.ragent.career.service.parser.CareerJsonParser;
 import com.nageoffer.ai.ragent.career.service.progress.CareerProgressStreamService;
 import com.nageoffer.ai.ragent.career.service.retrieval.CareerRetrievalEnhancement;
@@ -251,6 +253,58 @@ class ResumeOptimizationSuggestionTest {
         assertTrue(first.getCategory().length() <= 64);
         assertTrue(first.getTitle().length() <= 128);
         assertTrue(first.getRiskLevel().length() <= 32);
+    }
+
+    @Test
+    void createTaskAddsResumeAndJobNlpContextToOptimizationPromptWhenProviderAvailable() {
+        UserContext.set(LoginUser.builder().userId("user-1").username("alice").build());
+        when(resumeVersionMapper.selectOne(anyResumeVersionWrapper())).thenReturn(resumeVersion());
+        when(jobDescriptionMapper.selectOne(anyJobDescriptionWrapper())).thenReturn(jobDescription());
+        when(careerRetrievalEnhancementService.enhanceOptimization(any(ResumeVersionDO.class),
+                any(JobDescriptionDO.class), anyString())).thenReturn(defaultEnhancement());
+        when(singleFlightLlmService.chat(anyString(), anyString(), anyString(), any(ChatRequest.class)))
+                .thenReturn("{\"summary\":\"ok\"}")
+                .thenReturn("{\"qualityScore\":0.82,\"truthfulnessRisk\":false}");
+        when(careerJsonParser.parseObject(anyString())).thenReturn(Map.of(
+                "summary", "Add proof points",
+                "suggestions", List.of(Map.of(
+                        "category", "skills",
+                        "title", "Add PostgreSQL",
+                        "originalText", "SQL",
+                        "suggestedText", "PostgreSQL",
+                        "reason", "Matches JD",
+                        "riskLevel", "LOW"
+                ))
+        )).thenReturn(Map.of("qualityScore", 0.82D, "truthfulnessRisk", false));
+        doAnswer(invocation -> {
+            ResumeOptimizationTaskDO task = invocation.getArgument(0);
+            task.setId("task-nlp");
+            return 1;
+        }).when(taskMapper).insert(any(ResumeOptimizationTaskDO.class));
+        doAnswer(invocation -> {
+            ResumeOptimizationSuggestionDO suggestion = invocation.getArgument(0);
+            suggestion.setId("suggestion-nlp");
+            return 1;
+        }).when(suggestionMapper).insert(any(ResumeOptimizationSuggestionDO.class));
+        ResumeOptimizationServiceImpl service = newService();
+        service.setCareerNlpEnrichmentService(new CareerNlpEnrichmentService(
+                nlpRequest -> nlpRequest.scene().contains("JD")
+                        ? new CareerNlpAnalysisResult("xunfei-nlp", "sid-jd",
+                        List.of("PostgreSQL"), List.of("database"), "neutral")
+                        : new CareerNlpAnalysisResult("xunfei-nlp", "sid-resume",
+                        List.of("SQL", "APIs"), List.of("backend"), "positive")));
+
+        service.createTask(createRequest());
+
+        ArgumentCaptor<ChatRequest> chatRequestCaptor = ArgumentCaptor.forClass(ChatRequest.class);
+        verify(singleFlightLlmService, times(2))
+                .chat(anyString(), anyString(), anyString(), chatRequestCaptor.capture());
+        String executorPrompt = chatRequestCaptor.getAllValues().get(0).getMessages().get(0).getContent();
+        assertTrue(executorPrompt.contains("careerNlpContext"));
+        assertTrue(executorPrompt.contains("jdNlp"));
+        assertTrue(executorPrompt.contains("resumeNlp"));
+        assertTrue(executorPrompt.contains("PostgreSQL"));
+        assertTrue(executorPrompt.contains("SQL"));
     }
 
     @Test

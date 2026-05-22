@@ -29,6 +29,7 @@ import com.nageoffer.ai.ragent.career.dao.mapper.ResumeVersionMapper;
 import com.nageoffer.ai.ragent.career.service.impl.CandidateProfileServiceImpl;
 import com.nageoffer.ai.ragent.career.service.parser.CareerJsonParser;
 import com.nageoffer.ai.ragent.career.service.parser.ResumeTextExtractor;
+import com.nageoffer.ai.ragent.career.service.parser.ResumeTextExtractionResult;
 import com.nageoffer.ai.ragent.career.service.render.ResumeRenderPipeline;
 import com.nageoffer.ai.ragent.career.service.singleflight.CareerSingleFlightLlmService;
 import com.nageoffer.ai.ragent.framework.context.LoginUser;
@@ -144,7 +145,8 @@ class CandidateProfileServiceImplTest {
                 .userId("user-1")
                 .displayName("Alice")
                 .build();
-        when(resumeTextExtractor.extract(file)).thenReturn("resume text");
+        when(resumeTextExtractor.extractWithMetadata(file))
+                .thenReturn(new ResumeTextExtractionResult("resume text", "OCR_ENHANCED"));
         when(singleFlightLlmService.chat(anyString(), anyString(), anyString(), any(ChatRequest.class)))
                 .thenReturn("{\"basic\":{\"name\":\"Alice\"}}");
         when(careerJsonParser.parseObject(anyString())).thenReturn(Map.of(
@@ -181,6 +183,8 @@ class CandidateProfileServiceImplTest {
         ArgumentCaptor<ResumeVersionDO> versionCaptor = ArgumentCaptor.forClass(ResumeVersionDO.class);
         verify(resumeVersionMapper).insert(versionCaptor.capture());
         assertEquals(4, versionCaptor.getValue().getVersionNo());
+        org.junit.jupiter.api.Assertions.assertTrue(
+                versionCaptor.getValue().getContentJson().contains("\"contentSource\":\"OCR_ENHANCED\""));
     }
 
     @Test
