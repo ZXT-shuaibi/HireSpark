@@ -127,6 +127,25 @@ public class CareerSingleFlightLlmServiceImpl implements CareerSingleFlightLlmSe
                 null);
     }
 
+    public CareerSingleFlightLlmServiceImpl(CareerSingleFlightService singleFlightService,
+                                            LLMService llmService,
+                                            CareerTaskAttemptRecorder attemptRecorder,
+                                            CareerAiGuardService aiGuardService,
+                                            CareerSingleFlightProperties singleFlightProperties,
+                                            CareerSingleFlightLocalReplayCache localReplayCache,
+                                            CareerSingleFlightHeartbeatManager heartbeatManager,
+                                            CareerAgentTraceService careerAgentTraceService) {
+        this(singleFlightService,
+                llmService,
+                attemptRecorder,
+                aiGuardService,
+                singleFlightProperties,
+                localReplayCache,
+                heartbeatManager,
+                careerAgentTraceService,
+                null);
+    }
+
     /**
      * 创建带本地 L1 回放、持续心跳续租和 Agent 观测的 single-flight LLM 包装器。
      */
