@@ -216,6 +216,41 @@
       "description": "Maximum decoded image size accepted for XingChen demeanor uploads."
     },
     {
+      "name": "career.voice.xunfei-iat.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether the Xunfei Spark IAT file transcription agent is enabled."
+    },
+    {
+      "name": "career.voice.xunfei-iat.app-id",
+      "type": "java.lang.String",
+      "description": "Xunfei Spark IAT app id."
+    },
+    {
+      "name": "career.voice.xunfei-iat.api-key",
+      "type": "java.lang.String",
+      "description": "Xunfei Spark IAT API key."
+    },
+    {
+      "name": "career.voice.xunfei-iat.api-secret",
+      "type": "java.lang.String",
+      "description": "Xunfei Spark IAT API secret."
+    },
+    {
+      "name": "career.voice.xunfei-iat.endpoint-base-url",
+      "type": "java.lang.String",
+      "description": "Optional base URL override for Xunfei Spark IAT, mainly for private gateways or tests."
+    },
+    {
+      "name": "career.voice.xunfei-iat.transcribe-path",
+      "type": "java.lang.String",
+      "description": "Xunfei Spark IAT transcription request path."
+    },
+    {
+      "name": "career.voice.xunfei-iat.max-audio-bytes",
+      "type": "java.lang.Integer",
+      "description": "Maximum audio file size accepted by the file transcription agent."
+    },
+    {
       "name": "ragent.auth.sms.provider",
       "type": "java.lang.String",
       "description": "SMS verification sender provider. Use logging for local development or aliyun for Aliyun SMS."

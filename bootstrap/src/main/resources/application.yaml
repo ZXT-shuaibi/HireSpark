@@ -222,6 +222,21 @@ career:
       sample-rate: "16000"
       chunk-size-bytes: 1280
       send-interval-ms: 40
+    xunfei-iat:
+      enabled: false
+      app-id: ${XUNFEI_IAT_APP_ID:}
+      api-key: ${XUNFEI_IAT_API_KEY:}
+      api-secret: ${XUNFEI_IAT_API_SECRET:}
+      host: spark-api.xf-yun.com
+      endpoint-base-url: ${XUNFEI_IAT_ENDPOINT_BASE_URL:}
+      transcribe-path: /v2/iat
+      domain: iat
+      language: zh_cn
+      accent: mandarin
+      audio-encoding: raw
+      audio-format: audio/L16;rate=16000
+      timeout-seconds: 60
+      max-audio-bytes: 10485760
   websocket:
     allowed-origin-patterns:
       - http://localhost:*
