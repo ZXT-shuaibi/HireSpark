@@ -23,8 +23,11 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.nageoffer.ai.ragent.career.controller.request.CareerAlignmentCreateRequest;
 import com.nageoffer.ai.ragent.career.controller.request.CareerJobCreateRequest;
+import com.nageoffer.ai.ragent.career.controller.request.CareerJobUrlImportRequest;
 import com.nageoffer.ai.ragent.career.controller.vo.CareerAlignmentReportVO;
 import com.nageoffer.ai.ragent.career.controller.vo.CareerJobVO;
+import com.nageoffer.ai.ragent.career.crawler.JobPostingCrawlResult;
+import com.nageoffer.ai.ragent.career.crawler.JobPostingCrawler;
 import com.nageoffer.ai.ragent.career.dao.entity.JobAlignmentReportDO;
 import com.nageoffer.ai.ragent.career.dao.entity.JobDescriptionDO;
 import com.nageoffer.ai.ragent.career.dao.entity.ResumeVersionDO;
@@ -43,6 +46,7 @@ import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
 import com.nageoffer.ai.ragent.framework.exception.ClientException;
 import com.nageoffer.ai.ragent.framework.exception.ServiceException;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -56,6 +60,7 @@ import java.util.Map;
 public class JobAlignmentServiceImpl implements JobAlignmentService {
 
     private static final String SOURCE_TYPE_MANUAL = "MANUAL";
+    private static final String SOURCE_TYPE_URL = "URL";
     private static final String DEFAULT_JOB_TITLE = "Untitled Job";
     private static final int RAW_TEXT_MIN_LENGTH = 20;
     private static final int RAW_TEXT_MAX_LENGTH = 20000;
@@ -75,6 +80,12 @@ public class JobAlignmentServiceImpl implements JobAlignmentService {
     private final CareerSingleFlightLlmService singleFlightLlmService;
     private final CareerRetrievalEnhancementService careerRetrievalEnhancementService;
     private final ObjectMapper objectMapper = new ObjectMapper();
+    private JobPostingCrawler jobPostingCrawler;
+
+    @Autowired(required = false)
+    public void setJobPostingCrawler(JobPostingCrawler jobPostingCrawler) {
+        this.jobPostingCrawler = jobPostingCrawler;
+    }
 
     @Transactional(rollbackFor = Exception.class)
     @Override
@@ -110,6 +121,29 @@ public class JobAlignmentServiceImpl implements JobAlignmentService {
                 .build();
         jobDescriptionMapper.insert(job);
         return toJobVO(job, parsed);
+    }
+
+    @Transactional(rollbackFor = Exception.class)
+    @Override
+    public CareerJobVO importJobFromUrl(CareerJobUrlImportRequest request) {
+        if (request == null || StrUtil.isBlank(request.getUrl())) {
+            throw new ClientException("Job URL is required");
+        }
+        if (jobPostingCrawler == null) {
+            throw new ServiceException("Job posting crawler is not available");
+        }
+        String url = request.getUrl().trim();
+        JobPostingCrawlResult crawlResult = jobPostingCrawler.crawl(url);
+        if (crawlResult == null || StrUtil.isBlank(crawlResult.rawText())) {
+            throw new ServiceException("Failed to crawl job description from URL");
+        }
+        CareerJobCreateRequest createRequest = new CareerJobCreateRequest();
+        createRequest.setTitle(crawlResult.title());
+        createRequest.setCompany(crawlResult.company());
+        createRequest.setRawText(crawlResult.rawText());
+        createRequest.setSourceType(SOURCE_TYPE_URL);
+        createRequest.setSourceLocation(url);
+        return createJob(createRequest);
     }
 
     @Override
@@ -249,6 +283,8 @@ public class JobAlignmentServiceImpl implements JobAlignmentService {
                 .id(job.getId())
                 .title(job.getTitle())
                 .company(job.getCompany())
+                .sourceType(job.getSourceType())
+                .sourceLocation(job.getSourceLocation())
                 .rawText(job.getRawText())
                 .parsed(parsed)
                 .createTime(job.getCreateTime())

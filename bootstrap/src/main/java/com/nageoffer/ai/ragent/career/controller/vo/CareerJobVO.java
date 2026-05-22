@@ -37,6 +37,10 @@ public class CareerJobVO {
 
     private String company;
 
+    private String sourceType;
+
+    private String sourceLocation;
+
     private String rawText;
 
     private Map<String, Object> parsed;

@@ -216,6 +216,11 @@
       "description": "Maximum decoded image size accepted for XingChen demeanor uploads."
     },
     {
+      "name": "career.crawler.webmagic.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether WebMagic job posting URL import is enabled."
+    },
+    {
       "name": "career.voice.xunfei-iat.enabled",
       "type": "java.lang.Boolean",
       "description": "Whether the Xunfei Spark IAT file transcription agent is enabled."

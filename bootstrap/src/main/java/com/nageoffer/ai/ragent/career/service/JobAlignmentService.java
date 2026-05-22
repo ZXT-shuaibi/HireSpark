@@ -19,12 +19,15 @@ package com.nageoffer.ai.ragent.career.service;
 
 import com.nageoffer.ai.ragent.career.controller.request.CareerAlignmentCreateRequest;
 import com.nageoffer.ai.ragent.career.controller.request.CareerJobCreateRequest;
+import com.nageoffer.ai.ragent.career.controller.request.CareerJobUrlImportRequest;
 import com.nageoffer.ai.ragent.career.controller.vo.CareerAlignmentReportVO;
 import com.nageoffer.ai.ragent.career.controller.vo.CareerJobVO;
 
 public interface JobAlignmentService {
 
     CareerJobVO createJob(CareerJobCreateRequest request);
+
+    CareerJobVO importJobFromUrl(CareerJobUrlImportRequest request);
 
     CareerJobVO queryJob(String jdId);
 

@@ -187,6 +187,9 @@ career:
       upload-url: https://xingchen-api.xf-yun.com/workflow/v1/upload_file
       timeout-seconds: 60
       max-image-bytes: 5242880
+  crawler:
+    webmagic:
+      enabled: true
   render:
     font:
       enabled: true

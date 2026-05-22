@@ -19,6 +19,7 @@ package com.nageoffer.ai.ragent.career.controller;
 
 import com.nageoffer.ai.ragent.career.controller.request.CareerAlignmentCreateRequest;
 import com.nageoffer.ai.ragent.career.controller.request.CareerJobCreateRequest;
+import com.nageoffer.ai.ragent.career.controller.request.CareerJobUrlImportRequest;
 import com.nageoffer.ai.ragent.career.controller.vo.CareerAlignmentReportVO;
 import com.nageoffer.ai.ragent.career.controller.vo.CareerJobVO;
 import com.nageoffer.ai.ragent.career.service.JobAlignmentService;
@@ -44,6 +45,12 @@ public class CareerJobController {
     @Operation(summary = "创建岗位 JD", description = "保存岗位描述文本，供简历匹配、优化和面试出题复用")
     public Result<CareerJobVO> createJob(@RequestBody CareerJobCreateRequest request) {
         return Results.success(jobAlignmentService.createJob(request));
+    }
+
+    @PostMapping("/career/jobs/import-url")
+    @Operation(summary = "从招聘 URL 导入岗位 JD", description = "抓取招聘网页正文并复用 JD 解析链路生成目标岗位")
+    public Result<CareerJobVO> importJobFromUrl(@RequestBody CareerJobUrlImportRequest request) {
+        return Results.success(jobAlignmentService.importJobFromUrl(request));
     }
 
     @GetMapping("/career/jobs/{jdId}")

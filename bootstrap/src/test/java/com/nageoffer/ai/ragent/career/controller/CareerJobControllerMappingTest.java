@@ -41,5 +41,12 @@ class CareerJobControllerMappingTest {
                         .getAnnotation(GetMapping.class)
                         .value()
         );
+        assertArrayEquals(
+                new String[]{"/career/jobs/import-url"},
+                CareerJobController.class
+                        .getMethod("importJobFromUrl", com.nageoffer.ai.ragent.career.controller.request.CareerJobUrlImportRequest.class)
+                        .getAnnotation(PostMapping.class)
+                        .value()
+        );
     }
 }
