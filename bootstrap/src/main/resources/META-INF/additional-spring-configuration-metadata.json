@@ -221,6 +221,36 @@
       "description": "Whether WebMagic job posting URL import is enabled."
     },
     {
+      "name": "career.crawler.allowed-domains",
+      "type": "java.util.List<java.lang.String>",
+      "description": "Optional allowlist for job posting URL import domains. Empty means all public domains are allowed."
+    },
+    {
+      "name": "career.crawler.jd-verification.rule-enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether crawled job posting text must pass deterministic JD content checks before import."
+    },
+    {
+      "name": "career.crawler.jd-verification.llm-enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether crawled job posting text should be confirmed by a lightweight LLM JD classifier before import."
+    },
+    {
+      "name": "career.crawler.jd-verification.min-text-length",
+      "type": "java.lang.Integer",
+      "description": "Minimum crawled text length required before a URL can be treated as a JD."
+    },
+    {
+      "name": "career.crawler.jd-verification.min-signal-matches",
+      "type": "java.lang.Integer",
+      "description": "Minimum JD signal word matches required before a URL can be treated as a JD."
+    },
+    {
+      "name": "career.crawler.jd-verification.signal-words",
+      "type": "java.util.List<java.lang.String>",
+      "description": "Signal words used by deterministic JD content validation."
+    },
+    {
       "name": "career.resume.ocr.max-pdf-pages",
       "type": "java.lang.Integer",
       "description": "Maximum PDF pages rendered to images for resume OCR fallback."

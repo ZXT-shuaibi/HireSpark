@@ -26,6 +26,7 @@ import com.nageoffer.ai.ragent.career.controller.request.CareerJobCreateRequest;
 import com.nageoffer.ai.ragent.career.controller.request.CareerJobUrlImportRequest;
 import com.nageoffer.ai.ragent.career.controller.vo.CareerAlignmentReportVO;
 import com.nageoffer.ai.ragent.career.controller.vo.CareerJobVO;
+import com.nageoffer.ai.ragent.career.crawler.CareerCrawlerProperties;
 import com.nageoffer.ai.ragent.career.crawler.JobPostingCrawlResult;
 import com.nageoffer.ai.ragent.career.crawler.JobPostingCrawler;
 import com.nageoffer.ai.ragent.career.dao.entity.JobAlignmentReportDO;
@@ -69,6 +70,7 @@ public class JobAlignmentServiceImpl implements JobAlignmentService {
     private static final int COMPANY_MAX_LENGTH = 128;
     private static final int SOURCE_TYPE_MAX_LENGTH = 32;
     private static final int SOURCE_LOCATION_MAX_LENGTH = 512;
+    private static final int JD_URL_VERIFY_TEXT_MAX_LENGTH = 6000;
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {
     };
     private static final TypeReference<List<Object>> LIST_TYPE = new TypeReference<>() {
@@ -83,6 +85,7 @@ public class JobAlignmentServiceImpl implements JobAlignmentService {
     private final ObjectMapper objectMapper = new ObjectMapper();
     private JobPostingCrawler jobPostingCrawler;
     private CareerNlpEnrichmentService careerNlpEnrichmentService;
+    private CareerCrawlerProperties careerCrawlerProperties = new CareerCrawlerProperties();
 
     @Autowired(required = false)
     public void setJobPostingCrawler(JobPostingCrawler jobPostingCrawler) {
@@ -92,6 +95,13 @@ public class JobAlignmentServiceImpl implements JobAlignmentService {
     @Autowired(required = false)
     public void setCareerNlpEnrichmentService(CareerNlpEnrichmentService careerNlpEnrichmentService) {
         this.careerNlpEnrichmentService = careerNlpEnrichmentService;
+    }
+
+    @Autowired(required = false)
+    public void setCareerCrawlerProperties(CareerCrawlerProperties careerCrawlerProperties) {
+        if (careerCrawlerProperties != null) {
+            this.careerCrawlerProperties = careerCrawlerProperties;
+        }
     }
 
     @Transactional(rollbackFor = Exception.class)
@@ -145,9 +155,11 @@ public class JobAlignmentServiceImpl implements JobAlignmentService {
         if (crawlResult == null || StrUtil.isBlank(crawlResult.rawText())) {
             throw new ServiceException("Failed to crawl job description from URL");
         }
+        validateCrawledJdContent(crawlResult.rawText());
+        JdUrlVerification verification = verifyCrawledJdWithLlm(url, crawlResult.rawText());
         CareerJobCreateRequest createRequest = new CareerJobCreateRequest();
-        createRequest.setTitle(crawlResult.title());
-        createRequest.setCompany(crawlResult.company());
+        createRequest.setTitle(firstNotBlank(verification.title(), crawlResult.title()));
+        createRequest.setCompany(firstNotBlank(verification.company(), crawlResult.company()));
         createRequest.setRawText(crawlResult.rawText());
         createRequest.setSourceType(SOURCE_TYPE_URL);
         createRequest.setSourceLocation(url);
@@ -444,6 +456,74 @@ public class JobAlignmentServiceImpl implements JobAlignmentService {
                 + "\nRules: HYDE_QUERY evidence is QUERY_ONLY. Use it for retrieval context only; never treat it as resume fact.";
     }
 
+    private void validateCrawledJdContent(String rawText) {
+        CareerCrawlerProperties.JdVerification verification = effectiveJdVerification();
+        if (!verification.isRuleEnabled()) {
+            return;
+        }
+        String text = StrUtil.blankToDefault(rawText, "").trim();
+        if (text.length() < Math.max(1, verification.getMinTextLength())) {
+            throw new ClientException("Crawled URL content does not look like a job description");
+        }
+        String lowerText = text.toLowerCase(Locale.ROOT);
+        long matches = verification.getSignalWords() == null ? 0L : verification.getSignalWords().stream()
+                .filter(StrUtil::isNotBlank)
+                .map(signal -> signal.toLowerCase(Locale.ROOT))
+                .filter(lowerText::contains)
+                .distinct()
+                .count();
+        if (matches < Math.max(1, verification.getMinSignalMatches())) {
+            throw new ClientException("Crawled URL content does not look like a job description");
+        }
+    }
+
+    private JdUrlVerification verifyCrawledJdWithLlm(String url, String rawText) {
+        CareerCrawlerProperties.JdVerification verification = effectiveJdVerification();
+        if (!verification.isLlmEnabled()) {
+            return JdUrlVerification.empty();
+        }
+        String prompt = String.format("""
+                以下是从网页抓取的内容。判断它是否是招聘岗位描述(JD)。
+                如果是，提取岗位名称和公司名；如果不是，返回 isJd=false。
+                抓取 URL: %s
+                抓取内容: %s
+                输出 JSON 格式: {"isJd": true/false, "title": "...", "company": "..."}
+                """, url, limitText(rawText, "", JD_URL_VERIFY_TEXT_MAX_LENGTH));
+        String traceId = "career-jd-url-verify-" + stableRequestToken(url, rawText);
+        String response = singleFlightLlmService.chat("JD_URL_VERIFY",
+                buildSingleFlightKey("JD_URL_VERIFY", requireUserId(), stableRequestToken(url, rawText), prompt),
+                traceId,
+                ChatRequest.builder()
+                        .messages(List.of(ChatMessage.user(prompt)))
+                        .temperature(0D)
+                        .thinking(false)
+                        .build());
+        Map<String, Object> result = careerJsonParser.parseObject(response);
+        if (!asBoolean(result.get("isJd"))) {
+            throw new ClientException("Crawled URL content was confirmed as non-JD");
+        }
+        return new JdUrlVerification(extractString(result.get("title")), extractString(result.get("company")));
+    }
+
+    private CareerCrawlerProperties.JdVerification effectiveJdVerification() {
+        CareerCrawlerProperties properties = careerCrawlerProperties == null
+                ? new CareerCrawlerProperties()
+                : careerCrawlerProperties;
+        return properties.getJdVerification() == null
+                ? new CareerCrawlerProperties.JdVerification()
+                : properties.getJdVerification();
+    }
+
+    private boolean asBoolean(Object value) {
+        if (value instanceof Boolean bool) {
+            return bool;
+        }
+        if (value instanceof CharSequence text) {
+            return Boolean.parseBoolean(text.toString());
+        }
+        return false;
+    }
+
     private void enrichWithNlp(Map<String, Object> payload, String scene, String text, String traceId) {
         if (payload == null || careerNlpEnrichmentService == null) {
             return;
@@ -466,5 +546,12 @@ public class JobAlignmentServiceImpl implements JobAlignmentService {
         int hash = (StrUtil.blankToDefault(userId, "anonymous") + ":"
                 + StrUtil.blankToDefault(value, "")).hashCode();
         return Integer.toUnsignedString(hash).toLowerCase(Locale.ROOT);
+    }
+
+    private record JdUrlVerification(String title, String company) {
+
+        private static JdUrlVerification empty() {
+            return new JdUrlVerification(null, null);
+        }
     }
 }

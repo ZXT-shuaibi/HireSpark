@@ -3,6 +3,7 @@ package com.nageoffer.ai.ragent.career.crawler;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class JobPostingCrawlerTest {
 
@@ -31,5 +32,24 @@ class JobPostingCrawlerTest {
         assertThat(result.rawText()).contains("岗位职责");
         assertThat(result.rawText()).contains("Spring Boot");
         assertThat(result.rawText()).doesNotContain("window.tracker");
+    }
+
+    @Test
+    void rejectsMetadataServiceUrlBeforeCrawling() {
+        WebMagicJobPostingCrawler crawler = new WebMagicJobPostingCrawler();
+
+        assertThatThrownBy(() -> crawler.crawl("http://169.254.169.254/latest/meta-data"))
+                .hasMessageContaining("internal network");
+    }
+
+    @Test
+    void rejectsUrlOutsideAllowedDomainsBeforeCrawling() {
+        CareerCrawlerProperties properties = new CareerCrawlerProperties();
+        properties.setAllowedDomains(java.util.List.of("zhipin.com", "linkedin.com"));
+        WebMagicJobPostingCrawler crawler = new WebMagicJobPostingCrawler();
+        crawler.setProperties(properties);
+
+        assertThatThrownBy(() -> crawler.crawl("https://www.baidu.com"))
+                .hasMessageContaining("not in allowed domains");
     }
 }

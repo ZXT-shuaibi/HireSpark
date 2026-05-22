@@ -188,6 +188,12 @@ career:
       timeout-seconds: 60
       max-image-bytes: 5242880
   crawler:
+    allowed-domains: []
+    jd-verification:
+      rule-enabled: true
+      llm-enabled: ${CAREER_CRAWLER_JD_LLM_ENABLED:false}
+      min-text-length: 100
+      min-signal-matches: 2
     webmagic:
       enabled: true
   xunfei:
