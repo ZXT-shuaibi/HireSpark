@@ -14,6 +14,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.util.unit.DataSize;
 
 import java.io.InputStream;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
@@ -69,5 +71,29 @@ class RemoteFileFetcherWebCrawlerTest {
         ArgumentCaptor<InputStream> streamCaptor = ArgumentCaptor.forClass(InputStream.class);
         verify(fileStorageService).upload(eq("kb"), streamCaptor.capture(), anyLong(),
                 contains("kb-example-guide"), eq("text/markdown;charset=UTF-8"));
+    }
+
+    @Test
+    void refreshesChangedHtmlPageAsMarkdownForKnowledgeSchedule() throws Exception {
+        String url = "https://kb.example/guide";
+        when(httpClientHelper.head(eq(url), anyMap()))
+                .thenReturn(new HttpClientHelper.HttpHeadResponse("etag-new", "last-modified-new",
+                        "text/html;charset=utf-8", 128L, "guide.html"));
+        RemoteFileFetcher fetcher = new RemoteFileFetcher(httpClientHelper, fileStorageService);
+        ReflectionTestUtils.setField(fetcher, "maxFileSize", DataSize.ofMegabytes(5));
+        fetcher.setWebPageCrawlerAgent(request -> new WebPageCrawlResult(url, "Guide",
+                "Knowledge import page text", List.of("https://kb.example/next"), "text/html"));
+
+        try (RemoteFileFetcher.RemoteFetchResult result = fetcher.fetchIfChanged(
+                url, "etag-prev", "last-modified-prev", "hash-prev", "guide.html")) {
+            assertThat(result.changed()).isTrue();
+            assertThat(result.contentType()).isEqualTo("text/markdown;charset=UTF-8");
+            assertThat(result.fileName()).contains("kb-example-guide").endsWith(".md");
+            String markdown = Files.readString(result.tempFile(), StandardCharsets.UTF_8);
+            assertThat(markdown).contains("# Guide");
+            assertThat(markdown).contains("Source URL: " + url);
+            assertThat(markdown).contains("Knowledge import page text");
+        }
+        verify(httpClientHelper, never()).openStream(eq(url), any(Map.class), anyLong());
     }
 }

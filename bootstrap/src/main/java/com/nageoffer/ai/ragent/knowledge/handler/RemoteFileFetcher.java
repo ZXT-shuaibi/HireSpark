@@ -17,12 +17,13 @@
 
 package com.nageoffer.ai.ragent.knowledge.handler;
 
+import com.nageoffer.ai.ragent.core.crawler.WebPageCrawlerAgent;
 import com.nageoffer.ai.ragent.framework.exception.ClientException;
 import com.nageoffer.ai.ragent.framework.exception.ServiceException;
-import com.nageoffer.ai.ragent.core.crawler.WebPageCrawlRequest;
-import com.nageoffer.ai.ragent.core.crawler.WebPageCrawlResult;
-import com.nageoffer.ai.ragent.core.crawler.WebPageCrawlerAgent;
 import com.nageoffer.ai.ragent.ingestion.util.HttpClientHelper;
+import com.nageoffer.ai.ragent.knowledge.crawler.KnowledgeCrawledPage;
+import com.nageoffer.ai.ragent.knowledge.crawler.KnowledgePageParser;
+import com.nageoffer.ai.ragent.knowledge.crawler.KnowledgeUrlCrawler;
 import com.nageoffer.ai.ragent.rag.dto.StoredFileDTO;
 import com.nageoffer.ai.ragent.rag.service.FileStorageService;
 import lombok.RequiredArgsConstructor;
@@ -39,12 +40,8 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.net.URI;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.nio.charset.StandardCharsets;
-import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 
 /**
@@ -58,14 +55,21 @@ public class RemoteFileFetcher {
 
     private final HttpClientHelper httpClientHelper;
     private final FileStorageService fileStorageService;
-    private WebPageCrawlerAgent webPageCrawlerAgent;
+    private KnowledgeUrlCrawler knowledgeUrlCrawler;
 
     @Value("${spring.servlet.multipart.max-file-size:50MB}")
     private DataSize maxFileSize;
 
     @Autowired(required = false)
+    public void setKnowledgeUrlCrawler(KnowledgeUrlCrawler knowledgeUrlCrawler) {
+        this.knowledgeUrlCrawler = knowledgeUrlCrawler;
+    }
+
+    @Autowired(required = false)
     public void setWebPageCrawlerAgent(WebPageCrawlerAgent webPageCrawlerAgent) {
-        this.webPageCrawlerAgent = webPageCrawlerAgent;
+        if (this.knowledgeUrlCrawler == null && webPageCrawlerAgent != null) {
+            this.knowledgeUrlCrawler = new KnowledgeUrlCrawler(webPageCrawlerAgent, new KnowledgePageParser());
+        }
     }
 
     /**
@@ -94,20 +98,19 @@ public class RemoteFileFetcher {
 
     private StoredFileDTO fetchWebPageAsMarkdownIfPossible(String bucketName, String url,
                                                            HttpClientHelper.HttpHeadResponse headResponse) {
-        if (webPageCrawlerAgent == null || !shouldCrawlAsWebPage(url, headResponse)) {
+        if (!shouldCrawlAsWebPage(url, headResponse)) {
             return null;
         }
         try {
-            WebPageCrawlResult page = webPageCrawlerAgent.crawl(new WebPageCrawlRequest(url, 50000, true, 500L));
-            if (page == null || !StringUtils.hasText(page.text())) {
+            KnowledgeCrawledPage page = knowledgeUrlCrawler.crawl(url);
+            if (page == null || page.content() == null || page.content().length == 0) {
                 return null;
             }
-            byte[] content = webPageMarkdown(page).getBytes(StandardCharsets.UTF_8);
             return fileStorageService.upload(bucketName,
-                    new ByteArrayInputStream(content),
-                    content.length,
-                    webPageFileName(url, page),
-                    "text/markdown;charset=UTF-8");
+                    new ByteArrayInputStream(page.content()),
+                    page.size(),
+                    page.fileName(),
+                    page.contentType());
         } catch (RuntimeException ex) {
             log.warn("WebMagic knowledge crawler failed, falling back to remote file fetch: {}", url, ex);
             return null;
@@ -115,57 +118,10 @@ public class RemoteFileFetcher {
     }
 
     private boolean shouldCrawlAsWebPage(String url, HttpClientHelper.HttpHeadResponse headResponse) {
-        String contentType = headResponse == null ? null : headResponse.contentType();
-        if (StringUtils.hasText(contentType) && contentType.toLowerCase(Locale.ROOT).contains("text/html")) {
-            return true;
-        }
-        String fileName = headResponse == null ? null : headResponse.fileName();
-        if (StringUtils.hasText(fileName)) {
-            String lower = fileName.toLowerCase(Locale.ROOT);
-            return lower.endsWith(".html") || lower.endsWith(".htm");
-        }
-        return false;
-    }
-
-    private String webPageMarkdown(WebPageCrawlResult page) {
-        StringBuilder builder = new StringBuilder();
-        builder.append("# ").append(firstHasText(page.title(), "Untitled Web Page")).append("\n\n");
-        builder.append("Source URL: ").append(page.url()).append("\n\n");
-        builder.append(page.text()).append("\n");
-        List<String> links = page.links() == null ? List.of() : page.links();
-        if (!links.isEmpty()) {
-            builder.append("\n## Links\n");
-            links.stream().limit(50).forEach(link -> builder.append("- ").append(link).append("\n"));
-        }
-        return builder.toString();
-    }
-
-    private String webPageFileName(String url, WebPageCrawlResult page) {
-        String host = "web-page";
-        String slug = null;
-        try {
-            URI uri = URI.create(url);
-            if (StringUtils.hasText(uri.getHost())) {
-                host = uri.getHost().replace('.', '-');
-            }
-            String path = uri.getPath();
-            if (StringUtils.hasText(path)) {
-                String[] parts = path.split("/");
-                slug = parts.length == 0 ? null : parts[parts.length - 1];
-            }
-        } catch (Exception ignored) {
-            slug = page == null ? null : page.title();
-        }
-        String token = safeToken(host + "-" + firstHasText(slug, page == null ? null : page.title(), "page"));
-        return token + ".md";
-    }
-
-    private String safeToken(String value) {
-        String token = firstHasText(value, "web-page").toLowerCase(Locale.ROOT)
-                .replaceAll("[^a-z0-9._-]+", "-")
-                .replaceAll("-+", "-")
-                .replaceAll("^-|-$", "");
-        return StringUtils.hasText(token) ? token : "web-page";
+        return knowledgeUrlCrawler != null
+                && knowledgeUrlCrawler.supports(url,
+                headResponse == null ? null : headResponse.contentType(),
+                headResponse == null ? null : headResponse.fileName());
     }
 
     /**
@@ -187,6 +143,11 @@ public class RemoteFileFetcher {
             if (etagMatch || modifiedMatch) {
                 return RemoteFetchResult.skipped("远程文件未变化", etag, headLastModified, lastContentHash);
             }
+        }
+
+        RemoteFetchResult crawledPage = fetchWebPageIfChanged(url, lastContentHash, fallbackFileName, headResponse);
+        if (crawledPage != null) {
+            return crawledPage;
         }
 
         Path tempFile = null;
@@ -215,6 +176,45 @@ public class RemoteFileFetcher {
         } catch (RuntimeException e) {
             deleteTempFileQuietly(tempFile);
             throw e;
+        }
+    }
+
+    private RemoteFetchResult fetchWebPageIfChanged(String url,
+                                                    String lastContentHash,
+                                                    String fallbackFileName,
+                                                    HttpClientHelper.HttpHeadResponse headResponse) {
+        if (!shouldCrawlAsWebPage(url, headResponse)) {
+            return null;
+        }
+        Path tempFile = null;
+        try {
+            KnowledgeCrawledPage page = knowledgeUrlCrawler.crawl(url);
+            if (page == null || page.content() == null || page.content().length == 0) {
+                return null;
+            }
+            String hash = page.contentHash();
+            String etag = headResponse == null ? null : trimOrNull(headResponse.etag());
+            String lastModified = headResponse == null ? null : trimOrNull(headResponse.lastModified());
+            if (StringUtils.hasText(hash) && hash.equals(trimOrNull(lastContentHash))) {
+                return RemoteFetchResult.skipped("远程网页内容哈希未变化", etag, lastModified, hash);
+            }
+            tempFile = Files.createTempFile("knowledge-crawl-", ".md");
+            Files.write(tempFile, page.content());
+            return RemoteFetchResult.changed(
+                    tempFile,
+                    page.size(),
+                    page.contentType(),
+                    firstHasText(page.fileName(), fallbackFileName, "web-page.md"),
+                    hash,
+                    etag,
+                    lastModified);
+        } catch (IOException e) {
+            deleteTempFileQuietly(tempFile);
+            throw new ServiceException("知识库网页爬取结果写入临时文件失败: " + e.getMessage());
+        } catch (RuntimeException e) {
+            deleteTempFileQuietly(tempFile);
+            log.warn("WebMagic knowledge crawler failed, falling back to remote file refresh: {}", url, e);
+            return null;
         }
     }
 
