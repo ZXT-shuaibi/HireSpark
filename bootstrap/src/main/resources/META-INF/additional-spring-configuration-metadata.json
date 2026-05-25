@@ -3,6 +3,462 @@
     {
       "name": "rag.vector.type",
       "type": "java.lang.String",
-      "description": "Description for rag.vector.type."
-  }
-] }
+      "description": "Vector store implementation: pg or milvus."
+    },
+    {
+      "name": "rag.memory.hybrid-enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether conversation memory compression should use recent/protected/summarizable hybrid planning."
+    },
+    {
+      "name": "rag.memory.recent-keep-messages",
+      "type": "java.lang.Integer",
+      "description": "Number of newest messages kept out of each compression candidate window."
+    },
+    {
+      "name": "rag.memory.important-message-threshold",
+      "type": "java.lang.Integer",
+      "description": "Minimum deterministic importance score required to protect a non-recent message from summarization."
+    },
+    {
+      "name": "rag.memory.summary-max-source-messages",
+      "type": "java.lang.Integer",
+      "description": "Maximum low-importance source messages sent into one summary generation request."
+    },
+    {
+      "name": "rag.memory.token-trigger-threshold",
+      "type": "java.lang.Integer",
+      "description": "Approximate future token threshold for triggering memory compaction."
+    },
+    {
+      "name": "rag.memory.stage-switch-trigger-enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether memory compaction can be triggered by an explicit conversation or agent stage switch."
+    },
+    {
+      "name": "rag.memory.recovery-trigger-enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether memory compaction can be triggered after a session recovery event."
+    },
+    {
+      "name": "career.render.font.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether resume export should register governed fonts for PDF rendering."
+    },
+    {
+      "name": "career.render.font.pdf-family",
+      "type": "java.lang.String",
+      "description": "Font family name used when registering PDF fonts."
+    },
+    {
+      "name": "career.render.font.fail-on-missing-fonts",
+      "type": "java.lang.Boolean",
+      "description": "Fail PDF rendering when no configured font resource can be loaded."
+    },
+    {
+      "name": "career.render.font.css-families",
+      "type": "java.util.List<java.lang.String>",
+      "description": "CSS font-family stack emitted into rendered resume HTML."
+    },
+    {
+      "name": "career.render.font.paths",
+      "type": "java.util.List<java.lang.String>",
+      "description": "Ordered classpath: or file: font resources used by openhtmltopdf."
+    },
+    {
+      "name": "career.tts.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether long-text TTS planning is enabled for interview questions, follow-ups, and feedback."
+    },
+    {
+      "name": "career.tts.chunk-max-chars",
+      "type": "java.lang.Integer",
+      "description": "Maximum characters per planned TTS chunk."
+    },
+    {
+      "name": "career.tts.voice",
+      "type": "java.lang.String",
+      "description": "Logical voice name used by downstream TTS playback integrations."
+    },
+    {
+      "name": "career.tts.cache-ttl-seconds",
+      "type": "java.lang.Integer",
+      "description": "TTL for cached TTS artifacts when an implementation stores audio chunks."
+    },
+    {
+      "name": "career.tts.provider",
+      "type": "java.lang.String",
+      "description": "Logical TTS provider name. Use none for planning only or xunfei for long-text synthesis."
+    },
+    {
+      "name": "career.tts.xunfei.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether the Xunfei long-text TTS HTTP provider is enabled."
+    },
+    {
+      "name": "career.tts.xunfei.app-id",
+      "type": "java.lang.String",
+      "description": "Xunfei long-text TTS app id."
+    },
+    {
+      "name": "career.tts.xunfei.api-key",
+      "type": "java.lang.String",
+      "description": "Xunfei long-text TTS API key."
+    },
+    {
+      "name": "career.tts.xunfei.api-secret",
+      "type": "java.lang.String",
+      "description": "Xunfei long-text TTS API secret."
+    },
+    {
+      "name": "career.tts.xunfei.host",
+      "type": "java.lang.String",
+      "description": "Xunfei long-text TTS API host."
+    },
+    {
+      "name": "career.tts.xunfei.endpoint-base-url",
+      "type": "java.lang.String",
+      "description": "Optional full base URL override for Xunfei long-text TTS, mainly for private gateways or tests."
+    },
+    {
+      "name": "career.tts.xunfei.create-path",
+      "type": "java.lang.String",
+      "description": "Xunfei long-text TTS task creation path."
+    },
+    {
+      "name": "career.tts.xunfei.query-path",
+      "type": "java.lang.String",
+      "description": "Xunfei long-text TTS task query path."
+    },
+    {
+      "name": "career.tts.xunfei.audio-encoding",
+      "type": "java.lang.String",
+      "description": "Audio encoding requested from Xunfei long-text TTS."
+    },
+    {
+      "name": "career.tts.xunfei.timeout-seconds",
+      "type": "java.lang.Integer",
+      "description": "Maximum seconds to wait for a Xunfei long-text TTS task."
+    },
+    {
+      "name": "career.tts.xunfei.poll-interval-millis",
+      "type": "java.lang.Integer",
+      "description": "Polling interval for Xunfei long-text TTS task status."
+    },
+    {
+      "name": "career.tts.xunfei.max-polls",
+      "type": "java.lang.Integer",
+      "description": "Maximum polling attempts for Xunfei long-text TTS task status."
+    },
+    {
+      "name": "career.tts.xunfei.max-text-chars",
+      "type": "java.lang.Integer",
+      "description": "Maximum text length accepted by the Xunfei TTS provider."
+    },
+    {
+      "name": "career.demeanor.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether optional demeanor and expression auxiliary analysis is enabled."
+    },
+    {
+      "name": "career.demeanor.provider",
+      "type": "java.lang.String",
+      "description": "Logical demeanor provider name. Use none for observation-only aggregation or xingchen for workflow analysis."
+    },
+    {
+      "name": "career.demeanor.retention-policy",
+      "type": "java.lang.String",
+      "description": "Retention policy for derived demeanor analysis summaries."
+    },
+    {
+      "name": "career.demeanor.limitations",
+      "type": "java.util.List<java.lang.String>",
+      "description": "Limitations shown with demeanor analysis, including consent and auxiliary-signal boundaries."
+    },
+    {
+      "name": "career.demeanor.xingchen.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether the Xunfei XingChen demeanor workflow provider is enabled."
+    },
+    {
+      "name": "career.demeanor.xingchen.api-key",
+      "type": "java.lang.String",
+      "description": "Xunfei XingChen workflow API key."
+    },
+    {
+      "name": "career.demeanor.xingchen.api-secret",
+      "type": "java.lang.String",
+      "description": "Xunfei XingChen workflow API secret."
+    },
+    {
+      "name": "career.demeanor.xingchen.flow-id",
+      "type": "java.lang.String",
+      "description": "Xunfei XingChen workflow id for demeanor and expression analysis."
+    },
+    {
+      "name": "career.demeanor.xingchen.chat-url",
+      "type": "java.lang.String",
+      "description": "Xunfei XingChen workflow chat completion endpoint."
+    },
+    {
+      "name": "career.demeanor.xingchen.upload-url",
+      "type": "java.lang.String",
+      "description": "Xunfei XingChen workflow file upload endpoint used for Base64 image input."
+    },
+    {
+      "name": "career.demeanor.xingchen.timeout-seconds",
+      "type": "java.lang.Integer",
+      "description": "Maximum seconds for XingChen demeanor workflow requests."
+    },
+    {
+      "name": "career.demeanor.xingchen.max-image-bytes",
+      "type": "java.lang.Integer",
+      "description": "Maximum decoded image size accepted for XingChen demeanor uploads."
+    },
+    {
+      "name": "career.crawler.webmagic.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether WebMagic job posting URL import is enabled."
+    },
+    {
+      "name": "career.crawler.allowed-domains",
+      "type": "java.util.List<java.lang.String>",
+      "description": "Optional allowlist for job posting URL import domains. Empty means all public domains are allowed."
+    },
+    {
+      "name": "career.crawler.jd-verification.rule-enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether crawled job posting text must pass deterministic JD content checks before import."
+    },
+    {
+      "name": "career.crawler.jd-verification.llm-enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether crawled job posting text should be confirmed by a lightweight LLM JD classifier before import."
+    },
+    {
+      "name": "career.crawler.jd-verification.min-text-length",
+      "type": "java.lang.Integer",
+      "description": "Minimum crawled text length required before a URL can be treated as a JD."
+    },
+    {
+      "name": "career.crawler.jd-verification.min-signal-matches",
+      "type": "java.lang.Integer",
+      "description": "Minimum JD signal word matches required before a URL can be treated as a JD."
+    },
+    {
+      "name": "career.crawler.jd-verification.signal-words",
+      "type": "java.util.List<java.lang.String>",
+      "description": "Signal words used by deterministic JD content validation."
+    },
+    {
+      "name": "career.resume.ocr.max-pdf-pages",
+      "type": "java.lang.Integer",
+      "description": "Maximum PDF pages rendered to images for resume OCR fallback."
+    },
+    {
+      "name": "core.crawler.webmagic.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether the generic WebMagic crawler agent is enabled for knowledge URL imports."
+    },
+    {
+      "name": "core.crawler.webmagic.respect-robots-txt",
+      "type": "java.lang.Boolean",
+      "description": "Whether generic WebMagic crawler requests should mark robots-aware crawling policy."
+    },
+    {
+      "name": "core.crawler.webmagic.max-text-length",
+      "type": "java.lang.Integer",
+      "description": "Maximum readable text characters kept from a crawled web page."
+    },
+    {
+      "name": "core.crawler.webmagic.min-host-interval-millis",
+      "type": "java.lang.Long",
+      "description": "Minimum interval between generic crawler requests for the same host."
+    },
+    {
+      "name": "core.crawler.webmagic.user-agent",
+      "type": "java.lang.String",
+      "description": "User-Agent used by the generic WebMagic crawler agent."
+    },
+    {
+      "name": "career.xunfei.ocr.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether the Xunfei OCR HTTP provider is enabled."
+    },
+    {
+      "name": "career.xunfei.ocr.endpoint-base-url",
+      "type": "java.lang.String",
+      "description": "Optional base URL override for Xunfei OCR, mainly for private gateways or tests."
+    },
+    {
+      "name": "career.xunfei.ocr.path",
+      "type": "java.lang.String",
+      "description": "Xunfei OCR request path."
+    },
+    {
+      "name": "career.xunfei.ocr.max-image-bytes",
+      "type": "java.lang.Integer",
+      "description": "Maximum image size accepted by the Xunfei OCR provider."
+    },
+    {
+      "name": "career.xunfei.face-detect.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether the Xunfei face detection HTTP provider is enabled."
+    },
+    {
+      "name": "career.xunfei.face-detect.endpoint-base-url",
+      "type": "java.lang.String",
+      "description": "Optional base URL override for Xunfei face detection."
+    },
+    {
+      "name": "career.xunfei.face-detect.path",
+      "type": "java.lang.String",
+      "description": "Xunfei face detection request path."
+    },
+    {
+      "name": "career.xunfei.face-detect.max-image-bytes",
+      "type": "java.lang.Integer",
+      "description": "Maximum image size accepted by the Xunfei face detection provider."
+    },
+    {
+      "name": "career.xunfei.nlp.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether the Xunfei NLP HTTP provider is enabled."
+    },
+    {
+      "name": "career.xunfei.nlp.endpoint-base-url",
+      "type": "java.lang.String",
+      "description": "Optional base URL override for Xunfei NLP."
+    },
+    {
+      "name": "career.xunfei.nlp.path",
+      "type": "java.lang.String",
+      "description": "Xunfei NLP request path."
+    },
+    {
+      "name": "career.xunfei.nlp.max-text-chars",
+      "type": "java.lang.Integer",
+      "description": "Maximum text length accepted by the Xunfei NLP provider."
+    },
+    {
+      "name": "career.voice.xunfei-iat.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether the Xunfei Spark IAT file transcription agent is enabled."
+    },
+    {
+      "name": "career.voice.xunfei-iat.app-id",
+      "type": "java.lang.String",
+      "description": "Xunfei Spark IAT app id."
+    },
+    {
+      "name": "career.voice.xunfei-iat.api-key",
+      "type": "java.lang.String",
+      "description": "Xunfei Spark IAT API key."
+    },
+    {
+      "name": "career.voice.xunfei-iat.api-secret",
+      "type": "java.lang.String",
+      "description": "Xunfei Spark IAT API secret."
+    },
+    {
+      "name": "career.voice.xunfei-iat.endpoint-base-url",
+      "type": "java.lang.String",
+      "description": "Optional base URL override for Xunfei Spark IAT, mainly for private gateways or tests."
+    },
+    {
+      "name": "career.voice.xunfei-iat.transcribe-path",
+      "type": "java.lang.String",
+      "description": "Xunfei Spark IAT transcription request path."
+    },
+    {
+      "name": "career.voice.xunfei-iat.max-audio-bytes",
+      "type": "java.lang.Integer",
+      "description": "Maximum audio file size accepted by the file transcription agent."
+    },
+    {
+      "name": "ragent.cache.bloom.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether the Redisson RBloomFilter cache penetration guard is enabled."
+    },
+    {
+      "name": "ragent.datasource.dynamic.enabled",
+      "type": "java.lang.Boolean",
+      "description": "Whether dynamic data source routing annotations and routing context should be enabled."
+    },
+    {
+      "name": "ragent.datasource.dynamic.primary",
+      "type": "java.lang.String",
+      "description": "Default lookup key used by DynamicRoutingDataSource when no context data source is selected."
+    },
+    {
+      "name": "ragent.datasource.dynamic.strict",
+      "type": "java.lang.Boolean",
+      "description": "Reserved flag for rejecting unknown data source names when full dynamic registration is enabled."
+    },
+    {
+      "name": "ragent.cache.bloom.name",
+      "type": "java.lang.String",
+      "description": "Redis bloom filter name used by the cache penetration guard."
+    },
+    {
+      "name": "ragent.cache.bloom.expected-insertions",
+      "type": "java.lang.Long",
+      "description": "Expected insertion count used when initializing RBloomFilter."
+    },
+    {
+      "name": "ragent.cache.bloom.false-probability",
+      "type": "java.lang.Double",
+      "description": "False positive probability used when initializing RBloomFilter."
+    },
+    {
+      "name": "ragent.auth.sms.provider",
+      "type": "java.lang.String",
+      "description": "SMS verification sender provider. Use logging for local development or aliyun for Aliyun SMS."
+    },
+    {
+      "name": "ragent.auth.sms.code-ttl",
+      "type": "java.time.Duration",
+      "description": "How long a phone verification code remains valid."
+    },
+    {
+      "name": "ragent.auth.sms.ticket-ttl",
+      "type": "java.time.Duration",
+      "description": "How long a verified registration or password reset ticket remains valid."
+    },
+    {
+      "name": "ragent.auth.sms.resend-cooldown",
+      "type": "java.time.Duration",
+      "description": "Minimum interval before the same phone can request another SMS code."
+    },
+    {
+      "name": "ragent.auth.sms.max-send-per-window",
+      "type": "java.lang.Integer",
+      "description": "Maximum SMS sends allowed for one phone during the send window."
+    },
+    {
+      "name": "ragent.auth.sms.max-verify-failures",
+      "type": "java.lang.Integer",
+      "description": "Wrong code attempts allowed before invalidating the current code."
+    },
+    {
+      "name": "ragent.auth.sms.aliyun.access-key-id",
+      "type": "java.lang.String",
+      "description": "Aliyun SMS access key id."
+    },
+    {
+      "name": "ragent.auth.sms.aliyun.access-key-secret",
+      "type": "java.lang.String",
+      "description": "Aliyun SMS access key secret."
+    },
+    {
+      "name": "ragent.auth.sms.aliyun.sign-name",
+      "type": "java.lang.String",
+      "description": "Aliyun SMS sign name."
+    },
+    {
+      "name": "ragent.auth.sms.aliyun.template-code",
+      "type": "java.lang.String",
+      "description": "Aliyun SMS template code whose TemplateParam contains code."
+    }
+  ]
+}

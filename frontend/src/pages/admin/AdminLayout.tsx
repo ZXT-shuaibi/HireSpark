@@ -21,7 +21,10 @@ import {
   Upload,
   Users,
   FolderKanban,
-  Workflow
+  Workflow,
+  BriefcaseBusiness,
+  ListChecks,
+  Radar
 } from "lucide-react";
 import { useAuthStore } from "@/stores/authStore";
 import { Button } from "@/components/ui/button";
@@ -128,6 +131,34 @@ const menuGroups: MenuGroup[] = [
         label: "链路追踪",
         icon: Workflow
       },
+      {
+        id: "career",
+        path: "/admin/career",
+        label: "Career",
+        icon: BriefcaseBusiness,
+        children: [
+          {
+            path: "/admin/career",
+            label: "Career Dashboard",
+            icon: Radar
+          },
+          {
+            path: "/admin/career/tasks",
+            label: "浠诲姟绠＄悊",
+            icon: ListChecks
+          },
+          {
+            path: "/admin/career/rubric",
+            label: "Rubric",
+            icon: ClipboardList
+          },
+          {
+            path: "/admin/career/agent-traces",
+            label: "Agent Traces",
+            icon: Workflow
+          }
+        ]
+      },
     ]
   },
   {
@@ -187,6 +218,7 @@ export function AdminLayout() {
   const blurTimeoutRef = useRef<number | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const isDashboardRoute = location.pathname.startsWith("/admin/dashboard");
+  const isCareerRoute = location.pathname.startsWith("/admin/career");
 
   const handleLogout = async () => {
     await logout();
@@ -326,14 +358,16 @@ export function AdminLayout() {
   const isIngestionActive = location.pathname.startsWith("/admin/ingestion");
   const isIntentActive =
     location.pathname.startsWith("/admin/intent-tree") || location.pathname.startsWith("/admin/intent-list");
+  const isCareerActive = location.pathname.startsWith("/admin/career");
 
   useEffect(() => {
     setOpenGroups((prev) => ({
       ...prev,
       ingestion: prev.ingestion || isIngestionActive,
-      intent: prev.intent || isIntentActive
+      intent: prev.intent || isIntentActive,
+      career: prev.career || isCareerActive
     }));
-  }, [isIngestionActive, isIntentActive]);
+  }, [isIngestionActive, isIntentActive, isCareerActive]);
 
   const handlePasswordSubmit = async () => {
     if (!passwordForm.currentPassword || !passwordForm.newPassword) {

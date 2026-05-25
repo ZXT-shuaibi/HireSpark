@@ -1,0 +1,307 @@
+package com.nageoffer.ai.ragent.career.service;
+
+import com.nageoffer.ai.ragent.career.dao.entity.ResumeVersionDO;
+import com.nageoffer.ai.ragent.career.service.render.ResumeRenderFontProperties;
+import com.nageoffer.ai.ragent.career.service.render.ResumeRenderFontRegistry;
+import com.nageoffer.ai.ragent.career.service.render.ResumeRenderOutput;
+import com.nageoffer.ai.ragent.career.service.render.ResumeRenderPipeline;
+import com.nageoffer.ai.ragent.career.service.render.ResumeRenderValidationResult;
+import com.openhtmltopdf.pdfboxout.PdfRendererBuilder;
+import org.junit.jupiter.api.Test;
+import org.springframework.core.io.DefaultResourceLoader;
+
+import java.io.ByteArrayOutputStream;
+import java.nio.charset.StandardCharsets;
+import java.util.List;
+import java.util.Map;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class ResumeRenderPipelineTest {
+
+    private final ResumeRenderPipeline pipeline = new ResumeRenderPipeline();
+
+    /**
+     * 校验缺少基础字段时渲染前置检查会失败。
+     */
+    @Test
+    void missingRequiredFieldsFailValidation() {
+        ResumeRenderValidationResult result = pipeline.validate(ResumeVersionDO.builder()
+                .id("version-1")
+                .contentJson("{\"basic\":{}}")
+                .build(), "HTML");
+
+        assertFalse(result.valid());
+        assertTrue(result.rendererEnabled());
+        assertEquals(ResumeRenderPipeline.TEMPLATE_VERSION, result.templateVersion());
+        assertTrue(result.missingFields().contains("basic.name"));
+        assertTrue(result.traceId().contains("career-render-version-1-html"));
+    }
+
+    /**
+     * 校验原始 Markdown 不能绕过结构化姓名校验。
+     */
+    @Test
+    void rawMarkdownDoesNotSatisfyStructuredNameValidation() {
+        ResumeRenderValidationResult result = pipeline.validate(ResumeVersionDO.builder()
+                .id("version-raw")
+                .contentJson("{\"basic\":{}}")
+                .markdownContent("# Alice")
+                .build(), "MARKDOWN");
+
+        assertFalse(result.valid());
+        assertTrue(result.missingFields().contains("basic.name"));
+    }
+
+    /**
+     * 校验 PDF 和 Word 导出格式已经开启渲染能力。
+     */
+    @Test
+    void pdfAndWordAreSupportedByValidation() {
+        ResumeVersionDO version = ResumeVersionDO.builder()
+                .id("version-1")
+                .contentJson("{\"basic\":{\"name\":\"Alice\"}}")
+                .markdownContent("# Alice")
+                .build();
+
+        ResumeRenderValidationResult pdf = pipeline.validate(version, "PDF");
+        ResumeRenderValidationResult word = pipeline.validate(version, "WORD");
+
+        assertTrue(pdf.valid());
+        assertTrue(pdf.rendererEnabled());
+        assertNull(pdf.disabledReason());
+        assertNotEquals("PDF renderer is not enabled", pdf.disabledReason());
+        assertTrue(word.valid());
+        assertTrue(word.rendererEnabled());
+        assertNull(word.disabledReason());
+        assertNotEquals("WORD renderer is not enabled", word.disabledReason());
+    }
+
+    @Test
+    void validationPayloadIncludesRenderEngineAndFontStrategy() {
+        ResumeRenderValidationResult result = pipeline.validate(resumeVersionWithMarkdown(), "PDF");
+
+        Map<String, Object> payload = result.toPayload();
+
+        assertEquals("openhtmltopdf", payload.get("renderEngine"));
+        assertTrue(payload.get("fontFamily").toString().contains("Noto Sans SC"));
+        assertTrue(((List<?>) payload.get("fontResourceLocations")).contains("classpath:/fonts/NotoSansSC-Regular.ttf"));
+        Map<?, ?> fontStrategy = (Map<?, ?>) payload.get("fontStrategy");
+        assertEquals("configured-cjk-font-stack", fontStrategy.get("policy"));
+        assertEquals("operator-provided-or-system-installed-fonts", fontStrategy.get("source"));
+        assertEquals("operator-must-provide-licensed-font-files", fontStrategy.get("license"));
+        assertEquals("classpath-or-file-resource-registration", fontStrategy.get("loading"));
+        assertEquals("controlled-fallback-or-fail-on-missing-fonts", fontStrategy.get("fallback"));
+    }
+
+    @Test
+    void bundledFontManifestAndRegularFontAreAvailableForPdfRegistration() {
+        org.springframework.core.io.Resource manifest = new DefaultResourceLoader()
+                .getResource("classpath:/fonts/font-manifest.yaml");
+        ResumeRenderFontRegistry registry = new ResumeRenderFontRegistry(
+                new ResumeRenderFontProperties(), new DefaultResourceLoader());
+
+        ResumeRenderFontRegistry.FontRegistrationReport report =
+                registry.registerPdfFonts(new PdfRendererBuilder().toStream(new ByteArrayOutputStream()));
+
+        assertTrue(manifest.exists());
+        assertTrue(report.registered().contains("classpath:/fonts/NotoSansSC-Regular.ttf"));
+        assertTrue(report.registeredCount() >= 1);
+    }
+
+    @Test
+    void htmlPdfAndDocxRenderCjkTypographyAcceptanceSample() throws Exception {
+        String cjkSample = cjkTypographySample();
+        ResumeVersionDO version = ResumeVersionDO.builder()
+                .id("version-cjk")
+                .title("CJK Typography")
+                .contentJson("{\"basic\":{\"name\":\"CJK Typography\"}}")
+                .markdownContent(cjkSample)
+                .build();
+
+        String html = pipeline.buildHtmlDocument(version, cjkSample);
+        byte[] pdf = pipeline.renderPdf(html);
+        byte[] docx = pipeline.renderDocx(html);
+        String documentXml = zipEntryText(docx, "word/document.xml");
+
+        org.assertj.core.api.Assertions.assertThat(html)
+                .contains("\u5f20\u4e09", "Senior Java Engineer", "\u2713", "\uffe5")
+                .contains("<strong>\u7c97\u4f53\u80fd\u529b</strong>")
+                .contains("\u8fd9\u662f\u4e00\u6bb5\u7528\u4e8e\u9a8c\u6536\u6362\u884c");
+        assertTrue(new String(pdf, 0, 4, StandardCharsets.US_ASCII).startsWith("%PDF"));
+        assertTrue(pdf.length > 1024);
+        org.assertj.core.api.Assertions.assertThat(documentXml)
+                .contains("\u5f20\u4e09", "Senior Java Engineer", "\u2713", "\uffe5")
+                .contains("\u7c97\u4f53\u80fd\u529b")
+                .contains("\u8fd9\u662f\u4e00\u6bb5\u7528\u4e8e\u9a8c\u6536\u6362\u884c");
+    }
+
+    @Test
+    void htmlRenderFallsBackToResumeTitleWhenVersionIsNull() {
+        String html = pipeline.buildHtmlDocument(null, "# 张三\n\nJava 工程师");
+
+        org.assertj.core.api.Assertions.assertThat(html)
+                .contains("<title>Resume</title>", "<h1>张三</h1>");
+    }
+
+    /**
+     * 校验 HTML 渲染会把 Markdown 标题和段落转换成页面元素。
+     */
+    @Test
+    void htmlRenderContainsConvertedHeadingAndParagraph() {
+        ResumeRenderOutput output = pipeline.render(resumeVersionWithMarkdown(), "HTML");
+
+        String html = new String(output.content(), StandardCharsets.UTF_8);
+        org.assertj.core.api.Assertions.assertThat(html)
+                .contains("<!DOCTYPE html>", "<h1>Alice</h1>", "Java engineer")
+                .doesNotContain("<p>Java engineer</p>");
+        assertEquals("resume-version-1.html", output.fileName());
+        assertEquals("text/html", output.contentType());
+    }
+
+    @Test
+    void htmlRenderUsesGovernedChineseFontStack() {
+        String html = pipeline.buildHtmlDocument(resumeVersionWithMarkdown(), "# 张三\n\nJava 工程师");
+
+        org.assertj.core.api.Assertions.assertThat(html)
+                .contains("font-family")
+                .contains("'Noto Sans SC'", "'Noto Sans CJK SC'", "'Microsoft YaHei'", "'SimSun'", "sans-serif");
+    }
+
+    /**
+     * 校验结构化 JSON 会先映射到模板字段，再渲染成 Markdown，而不是直接输出原始 JSON。
+     */
+    @Test
+    void markdownRenderUsesTemplateFieldsFromContentJson() {
+        ResumeVersionDO version = ResumeVersionDO.builder()
+                .id("version-json")
+                .title("张三简历")
+                .contentJson("""
+                        {
+                          "basic": {
+                            "name": "张三",
+                            "headline": "后端开发工程师",
+                            "phone": "13800000000",
+                            "email": "zhangsan@example.com"
+                          },
+                          "summary": "负责高并发业务平台和智能简历交付。",
+                          "skills": ["Java", "Spring Boot", "Redis"],
+                          "projects": [
+                            {
+                              "name": "Ragent Career",
+                              "role": "核心开发",
+                              "description": "建设简历模板渲染和导出失效闭环。",
+                              "techStack": ["Java 17", "PostgreSQL"]
+                            }
+                          ],
+                          "experiences": [
+                            {
+                              "company": "示例科技",
+                              "position": "后端工程师",
+                              "startDate": "2022.01",
+                              "endDate": "至今",
+                              "responsibilities": ["负责导出链路", "维护任务追踪"]
+                            }
+                          ],
+                          "education": [
+                            {
+                              "school": "示例大学",
+                              "degree": "本科",
+                              "major": "计算机科学",
+                              "startDate": "2018",
+                              "endDate": "2022"
+                            }
+                          ]
+                        }
+                        """)
+                .build();
+
+        ResumeRenderOutput output = pipeline.render(version, "MARKDOWN");
+
+        String markdown = new String(output.content(), StandardCharsets.UTF_8);
+        org.assertj.core.api.Assertions.assertThat(markdown)
+                .contains("# 张三", "后端开发工程师", "## 技能", "- Java", "Ragent Career", "示例大学")
+                .doesNotContain("{\"basic\"");
+        assertEquals("resume-version-json.md", output.fileName());
+        assertEquals("text/markdown", output.contentType());
+    }
+
+    /**
+     * 校验 PDF 渲染会生成合法 PDF 头部。
+     */
+    @Test
+    void pdfRenderStartsWithPdfHeader() {
+        ResumeRenderOutput output = pipeline.render(resumeVersionWithMarkdown(), "PDF");
+
+        assertTrue(new String(output.content(), 0, 4, StandardCharsets.US_ASCII).startsWith("%PDF"));
+        assertEquals("resume-version-1.pdf", output.fileName());
+        assertEquals("application/pdf", output.contentType());
+    }
+
+    /**
+     * 校验 Word 渲染会生成包含主文档的 DOCX 压缩包。
+     */
+    @Test
+    void wordRenderCreatesDocxZipWithDocumentXml() throws Exception {
+        ResumeRenderOutput output = pipeline.render(resumeVersionWithMarkdown(), "WORD");
+
+        assertTrue(containsZipEntry(output.content(), "word/document.xml"));
+        assertEquals("resume-version-1.docx", output.fileName());
+        assertEquals("application/vnd.openxmlformats-officedocument.wordprocessingml.document", output.contentType());
+    }
+
+    /**
+     * 构造带 Markdown 正文的简历版本。
+     */
+    private ResumeVersionDO resumeVersionWithMarkdown() {
+        return ResumeVersionDO.builder()
+                .id("version-1")
+                .title("Alice Resume")
+                .contentJson("{\"basic\":{\"name\":\"Alice\"}}")
+                .markdownContent("# Alice\n\nJava engineer")
+                .build();
+    }
+
+    private String cjkTypographySample() {
+        return """
+                # \u5f20\u4e09 / Senior Java Engineer
+
+                **\u7c97\u4f53\u80fd\u529b**\uff1aSpring Boot\u3001Redis\u3001PostgreSQL\uff0c\u7b26\u53f7\u9a8c\u6536\uff1a\u2713 \u00b7 \u2192 \u00b7 \uffe5 \u00b7 % \u00b7 # \u00b7 ().
+
+                \u8fd9\u662f\u4e00\u6bb5\u7528\u4e8e\u9a8c\u6536\u6362\u884c\u548c\u957f\u6bb5\u843d\u6e32\u67d3\u7684\u4e2d\u6587\u5185\u5bb9\uff0c\u8981\u540c\u65f6\u8986\u76d6\u4e2d\u6587\u6807\u70b9\u3001\u82f1\u6587\u8bcd\u7ec4\u3001\u6570\u5b57 12345 \u548c\u5e38\u89c1\u7b26\u53f7\uff0c\u786e\u4fdd HTML\u3001PDF \u548c DOCX \u90fd\u80fd\u7a33\u5b9a\u4ea7\u51fa\u53ef\u9a8c\u6536\u6587\u6863\u3002
+                """;
+    }
+
+    /**
+     * 判断 DOCX 压缩包内是否包含指定条目。
+     */
+    private boolean containsZipEntry(byte[] content, String expectedName) throws Exception {
+        try (ZipInputStream zipInputStream = new ZipInputStream(new java.io.ByteArrayInputStream(content))) {
+            ZipEntry entry;
+            while ((entry = zipInputStream.getNextEntry()) != null) {
+                if (expectedName.equals(entry.getName())) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    private String zipEntryText(byte[] content, String expectedName) throws Exception {
+        try (ZipInputStream zipInputStream = new ZipInputStream(new java.io.ByteArrayInputStream(content))) {
+            ZipEntry entry;
+            while ((entry = zipInputStream.getNextEntry()) != null) {
+                if (expectedName.equals(entry.getName())) {
+                    return new String(zipInputStream.readAllBytes(), StandardCharsets.UTF_8);
+                }
+            }
+            return "";
+        }
+    }
+}

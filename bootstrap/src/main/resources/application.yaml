@@ -3,6 +3,22 @@ server:
   servlet:
     context-path: /api/ragent
 
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      show-details: never
+  health:
+    livenessstate:
+      enabled: true
+    readinessstate:
+      enabled: true
+
 spring:
   application:
     name: ragent${unique-name:}-service
@@ -67,6 +83,13 @@ rag:
     summary-start-turns: 5
     summary-enabled: true
     summary-max-chars: 200
+    hybrid-enabled: true
+    recent-keep-messages: 6
+    important-message-threshold: 70
+    summary-max-source-messages: 30
+    token-trigger-threshold: 8000
+    stage-switch-trigger-enabled: true
+    recovery-trigger-enabled: true
     title-max-length: 30
 
   semaphore:
@@ -100,6 +123,167 @@ rag:
   trace:
     enabled: true
     max-error-length: 1000
+
+career:
+  ai:
+    model-id:
+    prompt-version: v1
+  interview:
+    follow-up:
+      max-follow-up-count: 2
+      low-score-threshold: 60
+      low-score-fallback-question: 能否再补充一个关键细节，说明你的思路或取舍？
+      rule-chain:
+        - COMPLETED_STATE_GUARD
+        - FOLLOW_UP_LIMIT
+        - LLM_SUGGESTION
+        - FEEDBACK_GAP
+        - LOW_SCORE
+  features:
+    resume-export: true
+    text-interview: true
+    voice-interview: false
+    demeanor-analysis: false
+  tts:
+    enabled: false
+    chunk-max-chars: 180
+    voice: default
+    cache-ttl-seconds: 3600
+    provider: none
+    xunfei:
+      enabled: false
+      app-id: ${XUNFEI_TTS_APP_ID:}
+      api-key: ${XUNFEI_TTS_API_KEY:}
+      api-secret: ${XUNFEI_TTS_API_SECRET:}
+      host: api-dx.xf-yun.com
+      endpoint-base-url: ${XUNFEI_TTS_ENDPOINT_BASE_URL:}
+      create-path: /v1/private/dts_create
+      query-path: /v1/private/dts_query
+      language: zh
+      speed: 50
+      volume: 50
+      pitch: 50
+      rhy: 0
+      audio-encoding: lame
+      sample-rate: 16000
+      timeout-seconds: 90
+      poll-interval-millis: 1500
+      max-polls: 60
+      max-text-chars: 100000
+  demeanor:
+    enabled: false
+    provider: none
+    retention-policy: derived-summary-only
+    limitations:
+      - auxiliary-signal-only
+      - not-a-hiring-decision
+      - requires-user-consent
+    xingchen:
+      enabled: false
+      api-key: ${XUNFEI_XINGCHEN_API_KEY:}
+      api-secret: ${XUNFEI_XINGCHEN_API_SECRET:}
+      flow-id: ${XUNFEI_XINGCHEN_DEMEANOR_FLOW_ID:}
+      chat-url: https://xingchen-api.xf-yun.com/workflow/v1/chat/completions
+      upload-url: https://xingchen-api.xf-yun.com/workflow/v1/upload_file
+      timeout-seconds: 60
+      max-image-bytes: 5242880
+  crawler:
+    allowed-domains: []
+    jd-verification:
+      rule-enabled: true
+      llm-enabled: ${CAREER_CRAWLER_JD_LLM_ENABLED:false}
+      min-text-length: 100
+      min-signal-matches: 2
+    webmagic:
+      enabled: true
+  xunfei:
+    ocr:
+      enabled: false
+      app-id: ${XUNFEI_OCR_APP_ID:}
+      api-key: ${XUNFEI_OCR_API_KEY:}
+      api-secret: ${XUNFEI_OCR_API_SECRET:}
+      host: ${XUNFEI_OCR_HOST:api.xf-yun.com}
+      endpoint-base-url: ${XUNFEI_OCR_ENDPOINT_BASE_URL:}
+      path: ${XUNFEI_OCR_PATH:/v1/private/ocr}
+      service: ${XUNFEI_OCR_SERVICE:ocr}
+      timeout-seconds: 30
+      max-image-bytes: 5242880
+    face-detect:
+      enabled: false
+      app-id: ${XUNFEI_FACE_APP_ID:}
+      api-key: ${XUNFEI_FACE_API_KEY:}
+      api-secret: ${XUNFEI_FACE_API_SECRET:}
+      host: ${XUNFEI_FACE_HOST:api.xf-yun.com}
+      endpoint-base-url: ${XUNFEI_FACE_ENDPOINT_BASE_URL:}
+      path: ${XUNFEI_FACE_PATH:/v1/private/face_detect}
+      service: ${XUNFEI_FACE_SERVICE:face_detect}
+      timeout-seconds: 30
+      max-image-bytes: 5242880
+    nlp:
+      enabled: false
+      app-id: ${XUNFEI_NLP_APP_ID:}
+      api-key: ${XUNFEI_NLP_API_KEY:}
+      api-secret: ${XUNFEI_NLP_API_SECRET:}
+      host: ${XUNFEI_NLP_HOST:api.xf-yun.com}
+      endpoint-base-url: ${XUNFEI_NLP_ENDPOINT_BASE_URL:}
+      path: ${XUNFEI_NLP_PATH:/v1/private/nlp}
+      service: ${XUNFEI_NLP_SERVICE:nlp}
+      timeout-seconds: 30
+      max-text-chars: 20000
+  render:
+    font:
+      enabled: true
+      pdf-family: Noto Sans SC
+      fail-on-missing-fonts: false
+      css-families:
+        - Noto Sans SC
+        - Noto Sans CJK SC
+        - Microsoft YaHei
+        - SimHei
+        - SimSun
+        - Arial
+        - sans-serif
+      paths:
+        - ${RAGENT_RENDER_FONT_PATH:}
+        - classpath:/fonts/NotoSansSC-Regular.ttf
+        - file:C:/Windows/Fonts/NotoSansSC-VF.ttf
+        - file:C:/Windows/Fonts/simhei.ttf
+        - file:/usr/share/fonts/truetype/noto/NotoSansSC-Regular.ttf
+        - file:/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc
+        - file:/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.otf
+        - file:/usr/local/share/fonts/NotoSansSC-Regular.ttf
+        - file:/System/Library/Fonts/PingFang.ttc
+  voice:
+    xunfei-ast:
+      enabled: false
+      app-id: ${XUNFEI_AST_APP_ID:}
+      api-key: ${XUNFEI_AST_API_KEY:}
+      api-secret: ${XUNFEI_AST_API_SECRET:}
+      ws-base-url: wss://office-api-ast-dx.iflyaisol.com/ast/communicate/v1
+      audio-encode: pcm_s16le
+      lang: autodialect
+      sample-rate: "16000"
+      chunk-size-bytes: 1280
+      send-interval-ms: 40
+    xunfei-iat:
+      enabled: false
+      app-id: ${XUNFEI_IAT_APP_ID:}
+      api-key: ${XUNFEI_IAT_API_KEY:}
+      api-secret: ${XUNFEI_IAT_API_SECRET:}
+      host: spark-api.xf-yun.com
+      endpoint-base-url: ${XUNFEI_IAT_ENDPOINT_BASE_URL:}
+      transcribe-path: /v2/iat
+      domain: iat
+      language: zh_cn
+      accent: mandarin
+      audio-encoding: raw
+      audio-format: audio/L16;rate=16000
+      timeout-seconds: 60
+      max-audio-bytes: 10485760
+  websocket:
+    allowed-origin-patterns:
+      - http://localhost:*
+      - http://127.0.0.1:*
 
 ai:
   providers:
@@ -193,3 +377,43 @@ sa-token:
 
 app:
   demo-mode: false
+
+ragent:
+  datasource:
+    dynamic:
+      enabled: false
+      primary: primary
+      strict: false
+      data-sources: {}
+  cache:
+    bloom:
+      enabled: false
+      name: ragent:bloom:default
+      expected-insertions: 1000000
+      false-probability: 0.01
+  auth:
+    sms:
+      provider: ${RAGENT_AUTH_SMS_PROVIDER:logging}
+      code-ttl: 5m
+      ticket-ttl: 10m
+      resend-cooldown: 60s
+      max-send-per-window: 3
+      send-window: 10m
+      max-verify-failures: 3
+      ip-send-window: 10m
+      max-ip-send-per-window: 30
+      aliyun:
+        endpoint: https://dysmsapi.aliyuncs.com/
+        access-key-id: ${ALIYUN_SMS_ACCESS_KEY_ID:}
+        access-key-secret: ${ALIYUN_SMS_ACCESS_KEY_SECRET:}
+        sign-name: ${ALIYUN_SMS_SIGN_NAME:}
+        template-code: ${ALIYUN_SMS_TEMPLATE_CODE:}
+        region-id: ${ALIYUN_SMS_REGION_ID:cn-hangzhou}
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: method
+    tags-sorter: alpha

@@ -2,14 +2,14 @@
 
 ## Purpose
 
-Rewrite `docs/prd-career-agent-platform.md` from a BRD-like concept document into a product-grounded PRD that can support demand review, engineering decomposition, testing, and project defense.
+Rewrite `docs/career-agent-platform/prd-career-agent-platform.md` from a BRD-like concept document into a product-grounded PRD that can support demand review, engineering decomposition, testing, and project defense.
 
 The rewritten PRD will remain the single source of truth. It will directly overwrite the current PRD and advance it to v0.2.
 
 ## Confirmed Decisions
 
 - PRD style: product-grounded PRD, not pure business narrative and not pure engineering specification.
-- Rewrite target: directly overwrite `docs/prd-career-agent-platform.md`.
+- Rewrite target: directly overwrite `docs/career-agent-platform/prd-career-agent-platform.md`.
 - Detailed scope: expand Phase 1 and Phase 2 to product-detail level.
 - Roadmap scope: keep Phase 3 and Phase 4 at roadmap level.
 - MVP primary scenario: Java backend / AI application development job seeker.
@@ -393,12 +393,12 @@ Phase 4: Voice and multimodal extension.
 
 The next step after approval is to modify:
 
-- `docs/prd-career-agent-platform.md`
+- `docs/career-agent-platform/prd-career-agent-platform.md`
 
 Reference artifacts:
 
 - `docs/prd-career-agent-platform-rewrite.canvas`
-- `docs/superpowers/plans/2026-05-15-career-agent-platform.md`
+- `docs/career-agent-platform/implementation-plan.md`
 
 ## Self-Review
 

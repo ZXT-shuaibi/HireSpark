@@ -1,26 +1,10 @@
-/*
- * Licensed to the Apache Software Foundation (ASF) under one or more
- * contributor license agreements.  See the NOTICE file distributed with
- * this work for additional information regarding copyright ownership.
- * The ASF licenses this file to You under the Apache License, Version 2.0
- * (the "License"); you may not use this file except in compliance with
- * the License.  You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 package com.nageoffer.ai.ragent.rag.core.memory;
 
 import cn.hutool.core.collection.CollUtil;
 import cn.hutool.core.util.StrUtil;
 import com.nageoffer.ai.ragent.framework.convention.ChatMessage;
 import com.nageoffer.ai.ragent.framework.convention.ChatRequest;
+import com.nageoffer.ai.ragent.framework.trace.RagTraceContext;
 import com.nageoffer.ai.ragent.infra.chat.LLMService;
 import com.nageoffer.ai.ragent.rag.config.MemoryProperties;
 import com.nageoffer.ai.ragent.rag.core.prompt.PromptTemplateLoader;
@@ -61,6 +45,8 @@ public class JdbcConversationMemorySummaryService implements ConversationMemoryS
     private final PromptTemplateLoader promptTemplateLoader;
     private final RedissonClient redissonClient;
     private final Executor memorySummaryExecutor;
+    private final ConversationMemoryCompressionPlanner compressionPlanner;
+    private final ConversationMemoryTriggerPolicy triggerPolicy;
 
     @Override
     public void compressIfNeeded(String conversationId, String userId, ChatMessage message) {
@@ -70,9 +56,34 @@ public class JdbcConversationMemorySummaryService implements ConversationMemoryS
         if (message.getRole() != ChatMessage.Role.ASSISTANT) {
             return;
         }
-        CompletableFuture.runAsync(() -> doCompressIfNeeded(conversationId, userId), memorySummaryExecutor)
+        CompletableFuture.runAsync(() -> doCompressIfNeeded(conversationId, userId, ConversationMemoryTriggerContext.assistantAppend()), memorySummaryExecutor)
                 .exceptionally(ex -> {
                     log.error("对话记忆摘要异步任务失败 - conversationId: {}, userId: {}",
+                            conversationId, userId, ex);
+                    return null;
+                });
+    }
+
+    @Override
+    public void compressOnStageSwitch(String conversationId, String userId) {
+        if (Boolean.TRUE.equals(memoryProperties.getSummaryEnabled())) {
+            runCompressionAsync(conversationId, userId, ConversationMemoryTriggerContext.stageSwitch());
+        }
+    }
+
+    @Override
+    public void compressOnRecoveryEvent(String conversationId, String userId) {
+        if (Boolean.TRUE.equals(memoryProperties.getSummaryEnabled())) {
+            runCompressionAsync(conversationId, userId, ConversationMemoryTriggerContext.recoveryEvent());
+        }
+    }
+
+    private void runCompressionAsync(String conversationId,
+                                     String userId,
+                                     ConversationMemoryTriggerContext triggerContext) {
+        CompletableFuture.runAsync(() -> doCompressIfNeeded(conversationId, userId, triggerContext), memorySummaryExecutor)
+                .exceptionally(ex -> {
+                    log.error("瀵硅瘽璁板繂鎽樿寮傛浠诲姟澶辫触 - conversationId: {}, userId: {}",
                             conversationId, userId, ex);
                     return null;
                 });
@@ -96,10 +107,12 @@ public class JdbcConversationMemorySummaryService implements ConversationMemoryS
         return ChatMessage.system(wrapped);
     }
 
-    private void doCompressIfNeeded(String conversationId, String userId) {
+    private void doCompressIfNeeded(String conversationId,
+                                    String userId,
+                                    ConversationMemoryTriggerContext triggerContext) {
         long startTime = System.currentTimeMillis();
-        int triggerTurns = memoryProperties.getSummaryStartTurns();
-        int maxTurns = memoryProperties.getHistoryKeepTurns();
+        int triggerTurns = valueOrDefault(memoryProperties.getSummaryStartTurns(), 0);
+        int maxTurns = valueOrDefault(memoryProperties.getHistoryKeepTurns(), 0);
         if (maxTurns <= 0 || triggerTurns <= 0) {
             return;
         }
@@ -111,9 +124,6 @@ public class JdbcConversationMemorySummaryService implements ConversationMemoryS
         }
         try {
             long total = conversationGroupService.countUserMessages(conversationId, userId);
-            if (total < triggerTurns) {
-                return;
-            }
 
             ConversationSummaryDO latestSummary = conversationGroupService.findLatestSummary(conversationId, userId);
             List<ConversationMessageDO> latestUserTurns = conversationGroupService.listLatestUserOnlyMessages(
@@ -143,14 +153,13 @@ public class JdbcConversationMemorySummaryService implements ConversationMemoryS
             if (CollUtil.isEmpty(toSummarize)) {
                 return;
             }
-
             String lastMessageId = resolveLastMessageId(toSummarize);
             if (StrUtil.isBlank(lastMessageId)) {
                 return;
             }
 
             String existingSummary = latestSummary == null ? "" : latestSummary.getContent();
-            String summary = summarizeMessages(toSummarize, existingSummary);
+            String summary = summarizeTriggeredMessages(total, toSummarize, existingSummary, triggerContext);
             if (StrUtil.isBlank(summary)) {
                 return;
             }
@@ -168,9 +177,35 @@ public class JdbcConversationMemorySummaryService implements ConversationMemoryS
         }
     }
 
-    private String summarizeMessages(List<ConversationMessageDO> messages, String existingSummary) {
-        List<ChatMessage> histories = toHistoryMessages(messages);
+    String summarizeTriggeredMessages(long userTurns,
+                                      List<ConversationMessageDO> messages,
+                                      String existingSummary,
+                                      ConversationMemoryTriggerContext triggerContext) {
+        ConversationMemoryTriggerDecision triggerDecision = triggerPolicy.decide(
+                userTurns,
+                messages,
+                memoryProperties,
+                triggerContext
+        );
+        if (!triggerDecision.shouldCompress()) {
+            return null;
+        }
+        return summarizeMessages(messages, existingSummary, triggerDecision);
+    }
+
+    String summarizeMessages(List<ConversationMessageDO> messages,
+                             String existingSummary,
+                             ConversationMemoryTriggerDecision triggerDecision) {
+        ConversationMemoryCompressionPlan compressionPlan = resolveCompressionPlan(messages);
+        List<ConversationMessageDO> sourceMessages = Boolean.TRUE.equals(memoryProperties.getHybridEnabled())
+                ? compressionPlan.getSummarizableMessages()
+                : messages;
+        List<ChatMessage> histories = toHistoryMessages(sourceMessages);
         if (CollUtil.isEmpty(histories)) {
+            if (Boolean.TRUE.equals(memoryProperties.getHybridEnabled())
+                    && hasPersistedBuckets(compressionPlan)) {
+                return buildPersistedSummary(existingSummary, compressionPlan, triggerDecision);
+            }
             return existingSummary;
         }
 
@@ -203,11 +238,90 @@ public class JdbcConversationMemorySummaryService implements ConversationMemoryS
             String result = llmService.chat(request);
             log.info("对话摘要生成 - resultChars: {}", result.length());
 
-            return result;
+            return buildPersistedSummary(result, compressionPlan, triggerDecision);
         } catch (Exception e) {
             log.error("对话记忆摘要生成失败, conversationId相关消息数: {}", messages.size(), e);
             return existingSummary;
         }
+    }
+
+    private ConversationMemoryCompressionPlan resolveCompressionPlan(List<ConversationMessageDO> messages) {
+        if (!Boolean.TRUE.equals(memoryProperties.getHybridEnabled())) {
+            return new ConversationMemoryCompressionPlan(
+                    List.of(),
+                    List.of(),
+                    messages == null ? List.of() : messages,
+                    ids(messages),
+                    List.of()
+            );
+        }
+        return compressionPlanner.plan(messages, memoryProperties, RagTraceContext.getTraceId());
+    }
+
+    String buildPersistedSummary(String generatedSummary,
+                                 ConversationMemoryCompressionPlan plan,
+                                 ConversationMemoryTriggerDecision triggerDecision) {
+        if (!Boolean.TRUE.equals(memoryProperties.getHybridEnabled()) || plan == null) {
+            return generatedSummary;
+        }
+        String shortSummary = StrUtil.blankToDefault(generatedSummary, "").trim();
+        return """
+                [memory-compression strategy=hybrid triggers=%s traceId=%s estimatedTokens=%d userTurns=%d sourceIds=%s sourceTurns=%s protectedIds=%s protectedTurns=%s hotContextIds=%s]
+                [hot-context]
+                %s
+                [long-term-facts]
+                %s
+                [key-evidence]
+                %s
+                [risk-flags]
+                %s
+                [short-summary]
+                %s
+                """.formatted(
+                triggerDecision == null ? List.of() : triggerDecision.getTriggers(),
+                StrUtil.blankToDefault(plan.getTraceId(), ""),
+                triggerDecision == null ? 0 : triggerDecision.getEstimatedTokens(),
+                triggerDecision == null ? 0 : triggerDecision.getUserTurns(),
+                plan.getSourceMessageIds(),
+                plan.getSourceTurnRefs(),
+                plan.getProtectedMessageIds(),
+                plan.getProtectedTurnRefs(),
+                ids(plan.getHotContextMessages()),
+                formatMessagesWithIds(plan.getHotContextMessages()),
+                formatMessagesWithIds(plan.getLongTermFactMessages()),
+                formatMessagesWithIds(plan.getKeyEvidenceMessages()),
+                formatMessagesWithIds(plan.getRiskFlagMessages()),
+                shortSummary
+        ).trim();
+    }
+
+    private boolean hasPersistedBuckets(ConversationMemoryCompressionPlan plan) {
+        return plan != null
+                && (!plan.getHotContextMessages().isEmpty()
+                || !plan.getProtectedMessages().isEmpty());
+    }
+
+    private String formatMessagesWithIds(List<ConversationMessageDO> messages) {
+        if (CollUtil.isEmpty(messages)) {
+            return "";
+        }
+        return messages.stream()
+                .filter(item -> item != null && StrUtil.isNotBlank(item.getContent()))
+                .map(item -> "- id=%s role=%s content=%s".formatted(
+                        StrUtil.blankToDefault(item.getId(), ""),
+                        StrUtil.blankToDefault(item.getRole(), ""),
+                        item.getContent()))
+                .collect(Collectors.joining("\n"));
+    }
+
+    private List<String> ids(List<ConversationMessageDO> messages) {
+        if (CollUtil.isEmpty(messages)) {
+            return List.of();
+        }
+        return messages.stream()
+                .filter(item -> item != null && StrUtil.isNotBlank(item.getId()))
+                .map(ConversationMessageDO::getId)
+                .toList();
     }
 
     private List<ChatMessage> toHistoryMessages(List<ConversationMessageDO> messages) {
@@ -288,5 +402,9 @@ public class JdbcConversationMemorySummaryService implements ConversationMemoryS
 
     private String buildLockKey(String conversationId, String userId) {
         return userId.trim() + ":" + conversationId.trim();
+    }
+
+    private int valueOrDefault(Integer value, int defaultValue) {
+        return value == null ? defaultValue : value;
     }
 }

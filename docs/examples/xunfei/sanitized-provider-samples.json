@@ -1,0 +1,45 @@
+{
+  "longTextTts": {
+    "traceId": "tts-trace-demo",
+    "providerSid": "tts-sid-demo",
+    "status": "AUDIO_READY",
+    "audioFormat": "mp3",
+    "audioBase64Length": 2048
+  },
+  "xingChenDemeanor": {
+    "traceId": "demeanor-trace-demo",
+    "providerSid": "xc-sid-demo",
+    "compositeScore": 82,
+    "signals": [
+      "stable-eye-contact",
+      "calm-expression"
+    ]
+  },
+  "ocr": {
+    "traceId": "ocr-trace-demo",
+    "providerSid": "ocr-sid-demo",
+    "lines": [
+      "王小明",
+      "Java 后端工程师"
+    ]
+  },
+  "faceDetect": {
+    "traceId": "face-trace-demo",
+    "providerSid": "face-sid-demo",
+    "faceCount": 1,
+    "dominantEmotion": "calm",
+    "averageConfidence": 0.72
+  },
+  "nlp": {
+    "traceId": "nlp-trace-demo",
+    "providerSid": "nlp-sid-demo",
+    "keywords": [
+      "Spring Boot",
+      "RAG"
+    ],
+    "entities": [
+      "PostgreSQL"
+    ],
+    "sentiment": "neutral"
+  }
+}

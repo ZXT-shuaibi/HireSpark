@@ -1,0 +1,32 @@
+{
+  "TTS_AUTH_FAILED": {
+    "capability": "Long Text TTS",
+    "providerCode": "10105",
+    "category": "AUTH",
+    "userMessage": "TTS provider authentication failed"
+  },
+  "XINGCHEN_WORKFLOW_TIMEOUT": {
+    "capability": "XingChen Demeanor",
+    "providerCode": "WORKFLOW_TIMEOUT",
+    "category": "TIMEOUT",
+    "userMessage": "Demeanor workflow timed out"
+  },
+  "OCR_EMPTY_TEXT": {
+    "capability": "OCR",
+    "providerCode": "EMPTY_TEXT",
+    "category": "NO_CONTENT",
+    "userMessage": "OCR did not return readable text"
+  },
+  "FACE_NO_FACE": {
+    "capability": "FaceDetect",
+    "providerCode": "NO_FACE",
+    "category": "LOW_SIGNAL",
+    "userMessage": "No face signal was detected"
+  },
+  "NLP_EMPTY_RESULT": {
+    "capability": "NLP",
+    "providerCode": "EMPTY_RESULT",
+    "category": "LOW_SIGNAL",
+    "userMessage": "NLP provider returned no keywords or entities"
+  }
+}

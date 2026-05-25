@@ -17,18 +17,24 @@
 
 package com.nageoffer.ai.ragent.knowledge.handler;
 
+import com.nageoffer.ai.ragent.core.crawler.WebPageCrawlerAgent;
 import com.nageoffer.ai.ragent.framework.exception.ClientException;
 import com.nageoffer.ai.ragent.framework.exception.ServiceException;
 import com.nageoffer.ai.ragent.ingestion.util.HttpClientHelper;
+import com.nageoffer.ai.ragent.knowledge.crawler.KnowledgeCrawledPage;
+import com.nageoffer.ai.ragent.knowledge.crawler.KnowledgePageParser;
+import com.nageoffer.ai.ragent.knowledge.crawler.KnowledgeUrlCrawler;
 import com.nageoffer.ai.ragent.rag.dto.StoredFileDTO;
 import com.nageoffer.ai.ragent.rag.service.FileStorageService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.util.unit.DataSize;
 
+import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
@@ -49,9 +55,22 @@ public class RemoteFileFetcher {
 
     private final HttpClientHelper httpClientHelper;
     private final FileStorageService fileStorageService;
+    private KnowledgeUrlCrawler knowledgeUrlCrawler;
 
     @Value("${spring.servlet.multipart.max-file-size:50MB}")
     private DataSize maxFileSize;
+
+    @Autowired(required = false)
+    public void setKnowledgeUrlCrawler(KnowledgeUrlCrawler knowledgeUrlCrawler) {
+        this.knowledgeUrlCrawler = knowledgeUrlCrawler;
+    }
+
+    @Autowired(required = false)
+    public void setWebPageCrawlerAgent(WebPageCrawlerAgent webPageCrawlerAgent) {
+        if (this.knowledgeUrlCrawler == null && webPageCrawlerAgent != null) {
+            this.knowledgeUrlCrawler = new KnowledgeUrlCrawler(webPageCrawlerAgent, new KnowledgePageParser());
+        }
+    }
 
     /**
      * 流式拉取远程文件并上传到存储（用于文档上传场景）
@@ -63,6 +82,11 @@ public class RemoteFileFetcher {
         Long headContentLength = headResponse == null ? null : headResponse.contentLength();
         checkSizeLimit(maxBytes, headContentLength);
 
+        StoredFileDTO crawledPage = fetchWebPageAsMarkdownIfPossible(bucketName, url, headResponse);
+        if (crawledPage != null) {
+            return crawledPage;
+        }
+
         try (HttpClientHelper.HttpFetchStream response = httpClientHelper.openStream(url, Map.of(), maxBytes)) {
             String fileName = firstHasText(response.fileName(), headResponse == null ? null : headResponse.fileName(), "remote-file");
             String contentType = firstHasText(response.contentType(), headResponse == null ? null : headResponse.contentType(), null);
@@ -70,6 +94,34 @@ public class RemoteFileFetcher {
             // 远程导入统一先落临时文件，以实际读取到的字节数作为上传大小
             return uploadViaTemp(bucketName, response.bodyStream(), fileName, contentType, maxBytes);
         }
+    }
+
+    private StoredFileDTO fetchWebPageAsMarkdownIfPossible(String bucketName, String url,
+                                                           HttpClientHelper.HttpHeadResponse headResponse) {
+        if (!shouldCrawlAsWebPage(url, headResponse)) {
+            return null;
+        }
+        try {
+            KnowledgeCrawledPage page = knowledgeUrlCrawler.crawl(url);
+            if (page == null || page.content() == null || page.content().length == 0) {
+                return null;
+            }
+            return fileStorageService.upload(bucketName,
+                    new ByteArrayInputStream(page.content()),
+                    page.size(),
+                    page.fileName(),
+                    page.contentType());
+        } catch (RuntimeException ex) {
+            log.warn("WebMagic knowledge crawler failed, falling back to remote file fetch: {}", url, ex);
+            return null;
+        }
+    }
+
+    private boolean shouldCrawlAsWebPage(String url, HttpClientHelper.HttpHeadResponse headResponse) {
+        return knowledgeUrlCrawler != null
+                && knowledgeUrlCrawler.supports(url,
+                headResponse == null ? null : headResponse.contentType(),
+                headResponse == null ? null : headResponse.fileName());
     }
 
     /**
@@ -91,6 +143,11 @@ public class RemoteFileFetcher {
             if (etagMatch || modifiedMatch) {
                 return RemoteFetchResult.skipped("远程文件未变化", etag, headLastModified, lastContentHash);
             }
+        }
+
+        RemoteFetchResult crawledPage = fetchWebPageIfChanged(url, lastContentHash, fallbackFileName, headResponse);
+        if (crawledPage != null) {
+            return crawledPage;
         }
 
         Path tempFile = null;
@@ -119,6 +176,45 @@ public class RemoteFileFetcher {
         } catch (RuntimeException e) {
             deleteTempFileQuietly(tempFile);
             throw e;
+        }
+    }
+
+    private RemoteFetchResult fetchWebPageIfChanged(String url,
+                                                    String lastContentHash,
+                                                    String fallbackFileName,
+                                                    HttpClientHelper.HttpHeadResponse headResponse) {
+        if (!shouldCrawlAsWebPage(url, headResponse)) {
+            return null;
+        }
+        Path tempFile = null;
+        try {
+            KnowledgeCrawledPage page = knowledgeUrlCrawler.crawl(url);
+            if (page == null || page.content() == null || page.content().length == 0) {
+                return null;
+            }
+            String hash = page.contentHash();
+            String etag = headResponse == null ? null : trimOrNull(headResponse.etag());
+            String lastModified = headResponse == null ? null : trimOrNull(headResponse.lastModified());
+            if (StringUtils.hasText(hash) && hash.equals(trimOrNull(lastContentHash))) {
+                return RemoteFetchResult.skipped("远程网页内容哈希未变化", etag, lastModified, hash);
+            }
+            tempFile = Files.createTempFile("knowledge-crawl-", ".md");
+            Files.write(tempFile, page.content());
+            return RemoteFetchResult.changed(
+                    tempFile,
+                    page.size(),
+                    page.contentType(),
+                    firstHasText(page.fileName(), fallbackFileName, "web-page.md"),
+                    hash,
+                    etag,
+                    lastModified);
+        } catch (IOException e) {
+            deleteTempFileQuietly(tempFile);
+            throw new ServiceException("知识库网页爬取结果写入临时文件失败: " + e.getMessage());
+        } catch (RuntimeException e) {
+            deleteTempFileQuietly(tempFile);
+            log.warn("WebMagic knowledge crawler failed, falling back to remote file refresh: {}", url, e);
+            return null;
         }
     }
 
