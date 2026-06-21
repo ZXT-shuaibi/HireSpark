@@ -65,7 +65,7 @@ public class MilvusRetrieverService implements RetrieverService {
         params.put("metric_type", ragDefaultProperties.getMetricType());
         params.put("ef", 128);
 
-        SearchReq req = SearchReq.builder()
+        SearchReq.SearchReqBuilder reqBuilder = SearchReq.builder()
                 .collectionName(
                         StrUtil.isBlank(retrieveParam.getCollectionName()) ? ragDefaultProperties.getCollectionName() : retrieveParam.getCollectionName()
                 )
@@ -73,8 +73,13 @@ public class MilvusRetrieverService implements RetrieverService {
                 .data(vectors)
                 .topK(retrieveParam.getTopK())
                 .searchParams(params)
-                .outputFields(List.of("id", "content", "metadata"))
-                .build();
+                .outputFields(List.of("id", "content", "metadata"));
+
+        if (StrUtil.isNotBlank(retrieveParam.getFilterExpr())) {
+            reqBuilder.filter(retrieveParam.getFilterExpr());
+        }
+
+        SearchReq req = reqBuilder.build();
 
         SearchResp resp = milvusClient.search(req);
         List<List<SearchResp.SearchResult>> results = resp.getSearchResults();

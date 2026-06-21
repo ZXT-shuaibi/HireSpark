@@ -1,12 +1,12 @@
-version: 1
+version: 2
 policy: governed-cjk-render-fonts
 defaultFamily: Noto Sans SC
 resources:
-  - id: noto-sans-sc-regular
+  - id: noto-sans-sc-thin
     family: Noto Sans SC
     style: normal
-    weight: 400
-    file: classpath:/fonts/NotoSansSC-Regular.ttf
+    weight: 100
+    file: classpath:/fonts/NotoSansSC-Thin.ttf
     source: Google Noto Sans Simplified Chinese
     upstream: https://fonts.google.com/noto/specimen/Noto+Sans+SC
     license: SIL Open Font License 1.1
@@ -15,6 +15,84 @@ resources:
       - Basic Latin
       - General Punctuation
       - Currency Symbols
+
+  - id: noto-sans-sc-extralight
+    family: Noto Sans SC
+    style: normal
+    weight: 200
+    file: classpath:/fonts/NotoSansSC-ExtraLight.ttf
+    source: Google Noto Sans Simplified Chinese
+    upstream: https://fonts.google.com/noto/specimen/Noto+Sans+SC
+    license: SIL Open Font License 1.1
+
+  - id: noto-sans-sc-light
+    family: Noto Sans SC
+    style: normal
+    weight: 300
+    file: classpath:/fonts/NotoSansSC-Light.ttf
+    source: Google Noto Sans Simplified Chinese
+    upstream: https://fonts.google.com/noto/specimen/Noto+Sans+SC
+    license: SIL Open Font License 1.1
+
+  - id: noto-sans-sc-regular
+    family: Noto Sans SC
+    style: normal
+    weight: 400
+    file: classpath:/fonts/NotoSansSC-Regular.ttf
+    source: Google Noto Sans Simplified Chinese
+    upstream: https://fonts.google.com/noto/specimen/Noto+Sans+SC
+    license: SIL Open Font License 1.1
+
+  - id: noto-sans-sc-medium
+    family: Noto Sans SC
+    style: normal
+    weight: 500
+    file: classpath:/fonts/NotoSansSC-Medium.ttf
+    source: Google Noto Sans Simplified Chinese
+    upstream: https://fonts.google.com/noto/specimen/Noto+Sans+SC
+    license: SIL Open Font License 1.1
+
+  - id: noto-sans-sc-semibold
+    family: Noto Sans SC
+    style: normal
+    weight: 600
+    file: classpath:/fonts/NotoSansSC-SemiBold.ttf
+    source: Google Noto Sans Simplified Chinese
+    upstream: https://fonts.google.com/noto/specimen/Noto+Sans+SC
+    license: SIL Open Font License 1.1
+
+  - id: noto-sans-sc-bold
+    family: Noto Sans SC
+    style: normal
+    weight: 700
+    file: classpath:/fonts/NotoSansSC-Bold.ttf
+    source: Google Noto Sans Simplified Chinese
+    upstream: https://fonts.google.com/noto/specimen/Noto+Sans+SC
+    license: SIL Open Font License 1.1
+
+  - id: noto-sans-sc-extrabold
+    family: Noto Sans SC
+    style: normal
+    weight: 800
+    file: classpath:/fonts/NotoSansSC-ExtraBold.ttf
+    source: Google Noto Sans Simplified Chinese
+    upstream: https://fonts.google.com/noto/specimen/Noto+Sans+SC
+    license: SIL Open Font License 1.1
+
+  - id: noto-sans-sc-black
+    family: Noto Sans SC
+    style: normal
+    weight: 900
+    file: classpath:/fonts/NotoSansSC-Black.ttf
+    source: Google Noto Sans Simplified Chinese
+    upstream: https://fonts.google.com/noto/specimen/Noto+Sans+SC
+    license: SIL Open Font License 1.1
+
+  - id: noto-sans-sc-regular
+    family: Noto Sans SC
+    style: normal
+    weight: 400
+    file: classpath:/fonts/NotoSansSC-Regular.ttf
     loading:
       html: CSS font-family stack
       pdf: openhtmltopdf registered classpath font
@@ -27,5 +105,6 @@ resources:
       - Arial
       - sans-serif
 notes:
-  - Bundled font is used to make CI and local PDF rendering reproducible.
+  - Full Noto Sans SC weight spectrum (Thin 100 → Black 900) for professional CJK typography.
+  - Bundled fonts make CI and local PDF rendering reproducible.
   - Operators may override career.render.font.paths with licensed system or private fonts.

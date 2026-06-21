@@ -64,5 +64,11 @@ public class RetrieveRequest {
      * {"biz_type": "ATTENDANCE", "env": "TEST"}
      */
     private Map<String, Object> metadataFilters;
+
+    /**
+     * Milvus 原生过滤表达式（如 {@code metadata["doc_id"] in ["id1","id2"]}）。
+     * 优先级高于 metadataFilters。
+     */
+    private String filterExpr;
 }
 
