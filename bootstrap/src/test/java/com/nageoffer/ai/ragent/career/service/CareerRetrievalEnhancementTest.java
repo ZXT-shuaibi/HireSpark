@@ -219,7 +219,10 @@ class CareerRetrievalEnhancementTest {
         return new CareerRetrievalEnhancementServiceImpl(
                 provider(retrieverService),
                 provider(rerankService),
-                provider(hydeQueryGenerator));
+                provider(hydeQueryGenerator),
+                provider(null),
+                provider(null),
+                provider(null));
     }
 
     private <T> ObjectProvider<T> provider(T value) {

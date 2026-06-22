@@ -211,7 +211,8 @@ class ResumeOptimizationReviewTest {
         ArgumentCaptor<ResumeOptimizationTaskDO> taskCaptor =
                 ArgumentCaptor.forClass(ResumeOptimizationTaskDO.class);
         verify(taskMapper, times(2)).updateById(taskCaptor.capture());
-        ResumeOptimizationTaskDO finalTask = taskCaptor.getAllValues().getLast();
+        List<ResumeOptimizationTaskDO> allTasks = taskCaptor.getAllValues();
+        ResumeOptimizationTaskDO finalTask = allTasks.get(allTasks.size() - 1);
         assertEquals(CareerTaskStatus.SUCCESS.name(), finalTask.getStatus());
         assertEquals("career-opt-task-1", finalTask.getTraceId());
 

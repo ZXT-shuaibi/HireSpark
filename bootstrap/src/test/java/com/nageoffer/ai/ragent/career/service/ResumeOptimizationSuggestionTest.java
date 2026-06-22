@@ -241,7 +241,8 @@ class ResumeOptimizationSuggestionTest {
 
         ArgumentCaptor<ResumeOptimizationTaskDO> taskUpdateCaptor = ArgumentCaptor.forClass(ResumeOptimizationTaskDO.class);
         verify(taskMapper, times(2)).updateById(taskUpdateCaptor.capture());
-        ResumeOptimizationTaskDO finalTask = taskUpdateCaptor.getAllValues().getLast();
+        List<ResumeOptimizationTaskDO> allSuggestionTasks = taskUpdateCaptor.getAllValues();
+        ResumeOptimizationTaskDO finalTask = allSuggestionTasks.get(allSuggestionTasks.size() - 1);
         assertEquals(CareerTaskStatus.SUCCESS.name(), finalTask.getStatus());
         assertNotNull(finalTask.getOutputJson());
 
@@ -364,7 +365,7 @@ class ResumeOptimizationSuggestionTest {
         assertEquals("suggestion insert failed", ex.getMessage());
         verify(suggestionMapper).deleteById("suggestion-1");
         verify(taskMapper, times(2)).updateById(any(ResumeOptimizationTaskDO.class));
-        assertEquals(CareerTaskStatus.FAILED.name(), taskUpdateStatuses.getLast());
+        assertEquals(CareerTaskStatus.FAILED.name(), taskUpdateStatuses.get(taskUpdateStatuses.size() - 1));
     }
 
     @Test
