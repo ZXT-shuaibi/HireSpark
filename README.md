@@ -1,420 +1,406 @@
-<p align="center">
-  <a href="https://github.com/nageoffer/ragent">
-    <picture>
-      <source srcset="assets/ragent-ai-banner.png">
-      <img src="assets/ragent-ai-banner.png" alt="Ragent AI">
-    </picture>
-  </a>
-</p>
-
-<p align="center">
-  <strong>后端程序员转型 AI 工程师的第一站</strong><br/>
-</p>
+# HireSpark · AI 求职智能体平台
+
+> 业务定位:**面向求职者的 AI 智能体业务平台**,从简历上传到多轮模拟面试、JD 对齐、面试复盘、简历优化,完整跑通"找工作"这一真实业务链路。
+>
+> 技术定位:Java 17 + Spring Boot 3 的企业级 **Agentic RAG** 系统,自研 LLM 客户端 + 多模型路由 + 分布式 SingleFlight + 多 Agent 协作 + MCP 工具调用。
+>
+> 本仓库基于开源项目 [nageoffer/ragent](https://github.com/nageoffer/ragent) 二次开发,核心业务能力与系统骨架源自 Ragent,本仓库在其之上做了工程化打磨与定制。
+
+---
+
+## 📖 项目简介
+
+HireSpark 不是又一个 RAG Demo,它是一个**真实可用的求职业务系统**。求职者上传简历,系统会:
+
+1. 解析简历(支持 PDF / DOC / DOCX / Markdown / 图片 OCR);
+2. 抓取 JD 或手动录入 JD,与简历做多维度对齐分析;
+3. 基于对齐结果,自动生成**阶段化的多轮模拟面试计划**;
+4. 在面试过程中,**多 Agent 协作**完成追问、评分、复盘;
+5. 产出**面试报告**(含雷达图、Rubric 维度打分、关键证据引用);
+6. 基于面试表现,生成**简历优化建议**与下一轮优化任务。
+
+整个过程对求职者是端到端可见的:JD 对齐报告、面试过程全程 Trace、面试报告 PDF、简历优化建议 Excel/Word,以及**管理后台 Dashboard** 给运营/HR 看。
+
+---
+
+## 🏛️ 项目来源说明(必读)
+
+本仓库是基于 **nageoffer/ragent**(一个企业级 Agentic RAG 平台)二次开发的版本,主要做了以下工作:
+
+- **业务化定制**:在 Ragent 框架基础上,以"求职/招聘"为主线,沉淀了 `career` 业务包(19 张实体表、5 类 Agent、1 套追问规则引擎、1 套评分维度);
+- **工程化打磨**:增加 Lua 脚本协调的分布式 SingleFlight(防 LLM 重复调用)、自适应线程池、RocketMQ 幂等生产消费链路、Agent Trace 与 Tool Invocation 全链路审计;
+- **可观测性**:管理后台增加 Dashboard 时间桶聚合(Agent 调用次数、Token 消耗、面试会话数等)。
+
+使用本仓库请遵守 Apache-2.0 License,并保留对原项目 [nageoffer/ragent](https://github.com/nageoffer/ragent) 的署名。
+
+---
+
+## 🧭 技术栈
+
+| 维度 | 选型 |
+| --- | --- |
+| 语言 / 运行时 | Java 17 |
+| Web 框架 | Spring Boot 3.5.7 |
+| 持久层 | MyBatis-Plus 3.5.14 + PostgreSQL(HikariCP 连接池) |
+| 缓存 / 分布式协调 | Redis + Redisson 4.0 |
+| 消息队列 | RocketMQ Spring Boot Starter 2.3.5 |
+| 向量数据库 | Milvus 2.6.6(可切换为 pgvector,见 `rag.vector.type`) |
+| 文档解析 | Apache Tika 3.2(PDF/DOC/DOCX/Markdown)、Docx4j、CommonMark、OpenHTMLtoPDF |
+| LLM 客户端 | **自研 OkHttp 实现**(详见 `infra-ai` 模块) |
+| 多模型适配 | 阿里百炼(BaiLian)、SiliconFlow、Ollama 等 OpenAI 兼容协议 |
+| Agent / 工具协议 | MCP SDK 1.1.2(独立 `mcp-server` 模块) |
+| 熔断 / 限流 | Resilience4j 2.2.0 |
+| 鉴权 | Sa-Token 1.43 |
+| 链路追踪 | 自研 `RagTraceContext` / `RagTraceNode` / `RagTraceRoot` |
+| Excel / 文档 | EasyExcel 3.3、OpenHTMLtoPDF、Docx4j |
+| 实时通信 | Spring WebSocket(面试实时音频转写) |
+| 爬虫 | WebMagic 0.7.5(招聘 JD 抓取) |
+| OCR / TTS | 科大讯飞私有协议接入 |
+| 前端 | Vue 3 + Vite + Tailwind(见 `frontend/` 子项目) |
+| 构建 / 部署 | Maven 多模块 + Dockerfile(基于 `eclipse-temurin:17`) |
+
+**为什么不用 Spring AI / LangChain4j?**
+
+本项目自研了 LLM 客户端(`infra-ai` 模块),原因是生产环境需要:
+
+- **多模型路由**:百炼主调 + SiliconFlow 兜底 + Ollama 本地降级;
+- **SSE 流式取消**:用户切走页面要立刻停掉流;
+- **首包探测 + 自动降级**:模型 5 秒没回首包就切通道;
+- **多厂商协议适配**:百炼、SiliconFlow、OpenAI、Ollama 共存。
+
+这些能力 Spring AI / LangChain4j 在早期版本没有完整抽象,所以基于 OkHttp 自研。`infra-ai` 模块已抽象为可替换的 `ChatClient / EmbeddingClient / RerankClient`,后续若要切换框架,业务代码零改动。
+
+---
+
+## 🧱 项目结构
+
+```
+HireSpark/
+├── bootstrap/                # 业务装配入口,核心业务代码都在这里
+│   ├── src/main/java/com/nageoffer/ai/ragent/
+│   │   ├── RagentApplication.java
+│   │   ├── career/           # 求职业务核心(简历/面试/对齐/优化)
+│   │   ├── conversation/     # 会话编排与消息序列号
+│   │   ├── admin/            # 管理后台(Dashboard / 配置)
+│   │   ├── rag/              # RAG 检索增强生成
+│   │   ├── ingestion/        # 文档入库管道
+│   │   ├── knowledge/        # 知识库管理
+│   │   ├── user/             # 用户与权限
+│   │   └── mcp/              # MCP 客户端
+│   └── src/main/resources/
+│       ├── application.yaml  # 主配置
+│       ├── prompt/           # Prompt 模板(16 个 .st 文件)
+│       ├── lua/              # Redis Lua 脚本(SingleFlight 协调)
+│       └── fonts/            # 中文字体(OpenHTMLtoPDF 中文渲染)
+├── framework/                # 自研基础框架层
+│   └── src/main/java/com/nageoffer/ai/ragent/framework/
+│       ├── cache/            # 缓存抽象
+│       ├── idempotent/       # 幂等提交/幂等消费切面(SpEL)
+│       ├── mq/producer/      # RocketMQ 生产者 / 事务监听器
+│       ├── retrieve/         # BM25 评分器
+│       ├── threadpool/       # 自适应线程池 / 拒绝策略 / 动态刷新
+│       ├── trace/            # RagTrace 链路追踪
+│       └── exception/        # 统一异常体系
+├── infra-ai/                 # 自研 AI 基础设施
+│   └── src/main/java/com/nageoffer/ai/ragent/infra/
+│       ├── chat/             # Chat 客户端(多厂商适配 + SSE 流式)
+│       ├── embedding/        # Embedding 客户端
+│       ├── rerank/           # Rerank 客户端
+│       ├── model/            # 模型路由 / 健康检查 / 优先级调度
+│       └── token/            # Token 计数
+├── mcp-server/               # MCP 工具服务(独立进程)
+├── frontend/                 # Vue 3 前端
+├── docs/                     # 业务设计文档
+├── resources/
+│   ├── database/             # 数据库迁移脚本
+│   └── docker/               # docker-compose 编排
+├── scripts/                  # 验收脚本
+├── Dockerfile
+└── pom.xml                   # Maven 父 POM
+```
 
-<p align="center">
-  <a href="https://github.com/nageoffer/ragent/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/nageoffer/ragent?style=flat-square&logo=github&color=e8b227" /></a>&nbsp;
-  <a href="https://github.com/nageoffer/ragent/network/members"><img alt="GitHub forks" src="https://img.shields.io/github/forks/nageoffer/ragent?style=flat-square&logo=github&color=2d6a8a" /></a>&nbsp;
-  <a href="https://github.com/nageoffer/ragent/graphs/contributors"><img alt="Contributors" src="https://img.shields.io/github/contributors/nageoffer/ragent?style=flat-square&color=b56e7a" /></a>&nbsp;
-  <a href="./LICENSE"><img alt="License" src="https://img.shields.io/badge/license-Apache--2.0-4a9b8f?style=flat-square" /></a>
-  <img src="https://img.shields.io/badge/Spring%20AI-2.0-6DB33F?style=flat-square&logo=springboot&logoColor=white" />
-</p>
+---
 
-## 🚀 什么是 Ragent AI？
+## 🚀 核心业务能力
 
-Ragent 是一个企业级 Agentic RAG 平台，覆盖从文档入库到智能问答的完整链路。
+### 1. 简历与 JD 处理
 
-- **多路检索**：多渠道并行检索，去重重排兼顾精准与召回。
-- **意图识别**：树形多级分类，置信度不足主动引导澄清，扩展模型、提示词、topK 等核心参数。
-- **模型引擎**：模型调度、首包探测、健康检查、自动降级，模型故障不影响服务。
-- **MCP 集成**：非知识类意图自动提参调用业务工具，检索与工具无缝融合。
-- ……
+| 能力 | 关键代码 |
+| --- | --- |
+| 多格式简历解析 | `bootstrap/.../career/service/parser/` + Apache Tika + Docx4j |
+| 图片简历 OCR | `bootstrap/.../career/service/ocr/` + 科大讯飞 |
+| JD 抓取 | `bootstrap/.../career/crawler/WebMagicJobPostingCrawler.java` |
+| JD-简历对齐分析 | `bootstrap/.../career/service/decision/` + `JobAlignmentReportDO` |
+| 简历多版本管理 | `bootstrap/.../career/dao/entity/ResumeVersionDO` + `ResumeOptimizationTaskDO` |
 
-生产落地智能体会踩的坑，这里都有对应方案，一套经过真实场景锤炼的工程实践，系统补全 RAG / Agent / MCP 等知识，面试写进简历聊得起来。
+### 2. 多 Agent 协作的模拟面试
 
-![](assets/ragent-framework.png)
+`bootstrap/.../career/service/interview/agent/`
 
-## 🧭 快速导航
+| Agent | 职责 |
+| --- | --- |
+| `InterviewCoordinatorAgent` | 基于 JD 对齐摘要 + RAG 增强 + Prompt Template,生成阶段化面试计划 |
+| `JdAlignmentInterviewAgent` | 围绕 JD 关键能力点追问,验证候选人匹配度 |
+| `TechnicalInterviewerAgent` | 技术深度追问 |
+| `InterviewReflectorAgent` | 面试复盘,产出评分维度证据 |
 
-> 觉得不错？先点个 Star 收藏，所有链接都会在新标签页打开，不会离开本页 👇
+每次 Agent 调用都走 **SingleFlight LLM 服务** 防重复调用(详见下文技术亮点),并通过 `CareerAgentTraceService` 落库执行轨迹。
 
-<p align="left">
-  <a href="https://github.com/nageoffer/ragent/stargazers">
-    <img src="assets/star-me.svg" alt="Star this repo" />
-  </a>
-</p>
+### 3. 追问决策规则引擎
 
-| &nbsp; | 链接 | 说明 |
-|:---:|:---|:---|
-| 📖 | <a href="https://nageoffer.com/ragent" target="_blank">官网文档</a> | Ragent AI 完整文档 |
-| 🚀 | <a href="https://nageoffer.com/ragent/demo/" target="_blank">在线体验</a> | 无需部署，直接体验 Ragent AI |
-| ⚡ | <a href="https://nageoffer.com/ragent/local-dev/" target="_blank">快速启动</a> | 本地搭建 Ragent AI 前后端项目 |
-| 📝 | <a href="https://nageoffer.com/ragent/interview/" target="_blank">简历怎么写</a> | 项目如何写到简历上 |
-| 💡 | <a href="https://nageoffer.com/ragent/why-springai-langchain4j/" target="_blank">为什么不用 Spring AI / LangChain4j</a> | 技术选型的思考 |
+`bootstrap/.../career/service/followup/`
 
-## 🤝 贡献
+责任链模式,5 条规则按顺序匹配,首个命中即返回,带审计字段 `hitRule`:
 
-Ragent AI 仍在持续迭代中，欢迎参与共建，一起把项目打磨得更好。 感谢各位亦菲、彦祖们对 Ragent AI 的贡献：
+| 规则 | 触发条件 |
+| --- | --- |
+| `CompletedStateGuardRule` | 拦截已完成会话 |
+| `FollowUpLimitRule` | 限制追问次数 |
+| `LowScoreRule` | 低分强制追问 |
+| `MissingPointsRule` | 关键知识点缺失追问 |
+| `AiSuggestionRule` | 接受 AI 追问建议 |
 
-<p align="left">
-    <a href="https://github.com/nageoffer/ragent/graphs/contributors">
-        <img src="https://contrib.rocks/image?repo=nageoffer/ragent&columns=8" />
-    </a>
-</p>
+### 4. 面试评分与报告
 
-<details>
-<summary><b>📑 目录</b>（点击展开）</summary>
+`bootstrap/.../career/service/scoring/` + `InterviewReportDO` + Rubric 维度配置
 
-- [为什么学习 AI 项目](#为什么学习-ai-项目)
-  - [1. 校招现状](#1-校招现状)
-  - [2. 社招现状](#2-社招现状)
-  - [3. 问题是，怎么学？](#3-问题是怎么学)
-- [RAG 常见误区](#rag-常见误区)
-  - [1. 调个 API 就算会 RAG 了](#1-调个-api-就算会-rag-了)
-  - [2. RAG 就是“检索 + 生成”两步走](#2-rag-就是检索--生成两步走)
-  - [3. 用 OpenAI/LangChain 套一套就是企业级](#3-用-openailangchain-套一套就是企业级)
-  - [4. 只关注模型，忽略工程能力](#4-只关注模型忽略工程能力)
-- [Ragent 核心设计](#ragent-核心设计)
-- [项目质量怎么样？](#项目质量怎么样)
-  - [1. 代码规模](#1-代码规模)
-  - [2. 工程规范](#2-工程规范)
-  - [3. 可扩展性](#3-可扩展性)
-  - [4. 生产级特性](#4-生产级特性)
-  - [5. 精美控制台](#5-精美控制台)
-  - [6. 和市面上项目的区别](#6-和市面上项目的区别)
-- [常见问题答疑](#常见问题答疑)
-  - [1. 能够学到什么？](#1-能够学到什么)
-  - [2. 适合人群](#2-适合人群)
-- [为什么开源？](#为什么开源)
+面试结束后,生成:
 
-</details>
+- 多维度评分雷达图(`CareerRadarItemVO`);
+- 关键证据引用(每条评分都关联到面试中的具体回答);
+- 报告 PDF / Word 导出(`CareerExcelExportController`、`openhtmltopdf-pdfbox`、`docx4j`)。
 
-## 💡 为什么学习 AI 项目
+### 5. 简历优化建议
 
-AI 这波浪潮，Java 程序员已经躲不过去了。
+`bootstrap/.../career/service/optimization/` + `ResumeOptimizationTaskDO` + `ResumeOptimizationSuggestionDO`
 
-不管你现在做的是业务系统还是中间件，面试的时候多多少少都会被问到 AI 相关的东西。RAG 是什么？Agent 怎么实现？用过 MCP 吗？这些问题越来越高频。可以说，**AI 已经从加分项变成了必答题**。
+- 基于面试表现生成具体可执行的优化建议;
+- 支持建议审核 / 驳回 / 重提;
+- 优化后生成新简历版本(`ResumeVersionDO`)。
 
-但说实话，对于大多数应用层的开发者来说，去死磕大模型的微调、蒸馏、Transformer 原理，性价比并不高。真正实用的，是掌握 RAG 和 Agent 这些应用层的东西——能落地、能出活、面试也能聊得起来。
+### 6. 管理后台 Dashboard
 
-<details>
-<summary><b>校招 / 社招 / 怎么学？</b>（点击展开）</summary>
+`bootstrap/.../admin/`
 
-### 1. 校招现状
+- `DashboardController`:KPI 概览、时间桶趋势、Agent 调用指标;
+- `DashboardBucketedStatsQueryService`:按时间桶(日/周/月)聚合 Agent 调用次数、Token 消耗、面试会话数。
 
-简历上清一色的 CRUD 项目——商城、外卖、博客，面试官早就审美疲劳了。当别人还在写基于 SpringBoot 的 XX 管理系统时，你简历上有一个完整的 AI 项目，区分度直接拉满。而且大厂校招越来越看重候选人对新技术的敏感度，AI 项目能直接证明你的学习能力和技术视野。
+---
 
-### 2. 社招现状
+## 🔥 技术亮点(为什么这是一个能写进简历的项目)
 
-2024 年以来，几乎所有技术团队都在往 AI 方向靠。很多公司已经把有 AI 相关经验写进了 JD 里。你可能 Java/Go 写得很溜，但面试官会问：你对 LLM 了解多少？RAG 做过没有？向量检索怎么实现的？答不上来，直接少了一个谈薪的筹码。
+### 1. 分布式 SingleFlight 防 LLM 重复调用
 
-**说白了，学 AI 项目的核心原因就三个：**
+**痛点**:Agent 高频调用 LLM 时,网络重试 + 用户重复点击会产生大量重复请求,既烧 Token 又会引发并发规划不一致。
 
-1. **简历差异化**。同样是后端开发，有 AI 项目经验的简历通过率明显更高。不是因为 AI 多神奇，而是它能证明你不只是在重复造轮子。
-2. **面试有东西聊**。AI 项目涉及的技术栈足够深——Embedding、向量数据库、Prompt 工程、模型调用链路、检索策略……每一个点都能展开聊，比我用了 Redis 做缓存有意思得多。
-3. **实际工作用得上**。AI 不是实验室里的玩具，企业已经在大规模落地了。现在学，是为了接下来三到五年的职业发展铺路。
+**方案**:`bootstrap/.../career/service/singleflight/` + `bootstrap/src/main/resources/lua/career_single_flight_*.lua`
 
-### 3. 问题是，怎么学？
+- **L1 本地回放缓存**(`CareerSingleFlightLocalReplayCache`):进程内秒级复用最近响应;
+- **L2 Redis Lua 协调**(`CareerSingleFlightRedisCoordinator` + 4 个 Lua 脚本):
+  - `career_single_flight_acquire.lua`:原子抢占 owner;
+  - `career_single_flight_heartbeat.lua`:心跳续约;
+  - `career_single_flight_complete.lua`:完成回调;
+  - `career_single_flight_replay.lua`:结果回放;
+- **L3 数据库兜底**(`CareerSingleFlightRecordDO` + `CareerSingleFlightRecordMapper`):Redis 不可用时降级到 MySQL 唯一索引;
+- **Fencing Token**:防止延迟回包覆盖新 owner 的结果;
+- **心跳机制**:长任务 owner 持续续约,超时未续约则被抢占。
 
-很多人跟着 B 站视频或者 GitHub 上的开源项目撸了一遍，以为自己懂了。结果面试一问深的，直接懵了。原因很简单：那些 Demo 级别的项目，和企业真正要用的东西，差距太大了。
+### 2. 多模型路由 + 首包探测 + 自动降级
 
-还有些同学报了训练营，发现清一色是 Python。语言不熟、生态不通，学完感觉收获有限，回到 Java 这边还是不知道怎么下手。就算用 Spring AI 或者 LangChain4j，版本迭代太快，低版本功能缺，高版本升级约等于重写，也是一肚子苦水。
+`infra-ai/.../model/`
 
-基于这些问题，我决定做一个 RAG 实战项目，名字叫 **Ragent**。
+- `ModelSelector` + `ModelTarget`:按优先级选择模型;
+- `ModelHealthStore`:记录每个模型的健康状态(连续失败次数、最近一次延迟);
+- `ModelRoutingExecutor`:首包探测,5 秒内无响应则切下一通道;
+- `RoutingLLMService` + `RoutingEmbeddingService` + `RoutingRerankService`:统一路由抽象。
 
-这个项目会覆盖市面上主流的 RAG 技术点，也会涉及 MCP、Agent 等场景。更重要的是，它不是我看了几篇文章拼凑出来的玩具——我在公司**实际落地过 RAG 系统**，解决过信息孤岛、知识检索、效率提升这些真实的业务问题。所以 Ragent 的复杂度，就是企业级项目该有的复杂度。
+支持厂商:阿里百炼(BaiLian)、SiliconFlow、Ollama,任何兼容 OpenAI 协议的厂商可一行配置接入。
 
-学完之后，你可以放心大胆地跟面试官讲：**企业里就是这么做的**。
+### 3. SSE 流式响应 + 流式取消
 
-</details>
+`infra-ai/.../chat/`
 
-## ⚠️ RAG 常见误区
+- `OpenAIStyleSseParser`:解析 SSE 流;
+- `ProbeStreamBridge`:首包探测桥;
+- `StreamAsyncExecutor`:异步流式执行;
+- `StreamCancellationHandle` + `StreamCancellationHandles`:每个会话一个取消句柄,WebSocket 断开 / 用户切走页面立刻停掉 LLM 调用。
 
-市面上打着 RAG 旗号的项目不少，但很多要么是玩具级 Demo，要么是概念包装。在学之前，先把这几个误区理清楚，避免踩坑。
+### 4. RocketMQ 幂等生产与消费
 
-常规 RAG 的流程如下：
+`framework/.../mq/producer/` + `framework/.../idempotent/`
 
-![](assets/rag-misconceptions-v2.png)
+- `RocketMQProducerAdapter` + `DelegatingTransactionListener` + `TransactionChecker`:事务消息支持;
+- `IdempotentSubmitAspect` + `IdempotentConsumeAspect`:基于 **SpEL 表达式**从入参 / 消息体抽取幂等 Key;
+- 状态机:`CONSUMING → CONSUMED / FAILED`,失败可重试,幂等可证。
 
-<details>
-<summary><b>4 个常见误区详解</b>（点击展开）</summary>
+长耗时任务(简历解析、面试复盘、报告生成)全部走异步链路,业务接口秒回。
 
-### 1. 调个 API 就算会 RAG 了
+### 5. 自适应线程池
 
-很多教程的套路是：调一下 OpenAI 的 Embedding 接口，往向量数据库里塞点数据，再用 LLM 生成答案——完事了。这顶多算跑通了一个 Demo，离会 RAG 差得远。
+`framework/.../threadpool/`
 
-真正的 RAG 系统要考虑的问题多得多：文档怎么切分效果最好？检索召回率不够怎么办？多路召回怎么融合排序？幻觉怎么控制？这些才是面试官会追问的点。
+- `AdaptiveBufferedThreadPoolExecutor`:缓冲队列 + 自适应拒绝策略;
+- `AdaptiveRejectedHandler`:区分 CallerRuns / DiscardOldest / 自定义降级;
+- `RefreshableExecutor`:运行期动态刷新核心线程数、最大线程数、队列容量。
 
-跑通 Demo 和做出能上线的系统之间，差的不是代码量，是对每个环节的深入理解。
+Agent 多 Agent 并行调用 LLM 时,线程池隔离避免下游雪崩。
 
-### 2. RAG 就是“检索 + 生成”两步走
+### 6. RAG 检索增强
 
-`Retrieval-Augmented Generation` 这个名字确实容易让人觉得就是检索加生成。但实际工程中，一个能用的 RAG 系统至少涉及这些环节：
+`bootstrap/.../career/service/retrieval/`
 
-- **数据处理**：PDF、Word、PPT、网页，格式五花八门，光是解析成干净文本就是一堆脏活。PDF 里的表格、扫描件、双栏排版，每一个都是坑。
-- **分块策略**：切太大检索不精准，切太小上下文丢失。按段落切、按固定字数切、按语义切，不同文档可能需要不同策略。
-- **问题重写**：用户问“报销咋整”，你拿这四个字去检索，效果能好吗？多轮对话里用户说“怎么申请”，不补上下文系统根本不知道在问啥。
-- **意图识别**：用户是想查知识库，还是要调用业务系统？是闲聊还是正经提问？走错了路，答案肯定不对。
-- **检索策略**：纯向量检索对精确匹配很弱，用户问一个订单号，向量检索可能完全找不到。混合检索怎么融合、top-k 选多少、要不要重排序，都是取舍。
-- **会话记忆**：20 轮对话全塞给模型？Token 成本扛不住。只带最近几轮？可能丢关键上下文。记忆的压缩、摘要、持久化，又是一套单独的机制。
+- `HierarchicalRetrievalService`:**粗筛 + 精检**两阶段检索
+  - 粗筛 `topK=6` 锁定候选 doc_id;
+  - 精检 `topK=12` 在候选 doc_id 范围内拉完整 chunk;
+  - 通过 `metadata["doc_id"] in [...]` 缩小搜索空间约 10 倍。
+- `CareerHydeQueryGenerator`:Hyde(Hypothetical Document Embeddings)查询改写;
+- `CareerRetrievalEnhancement`:证据分类(KB 知识 / MCP 工具 / 业务数据);
+- `CareerRetrievalEnhancementServiceImpl`:Hyde + 多路检索 + 重排序流水线。
 
-每一环都有坑，每一环都值得深挖。面试的时候能把这些讲清楚，比背概念有用得多。
+### 7. Agent 全链路 Trace
 
-### 3. 用 OpenAI/LangChain 套一套就是企业级
+`bootstrap/.../career/service/observability/` + `framework/.../trace/`
 
-OpenAI/LangChain 是个好工具，但直接拿来套壳不等于企业级。企业场景下要面对的是：
+- 每次 Agent 调用 LLM:落 `CareerAgentExecutionTraceDO`(场景、Prompt、响应、Token、耗时、TraceId);
+- 每次 Agent 调用工具:落 `CareerAgentToolInvocationDO`(工具名、入参、出参、状态);
+- 会话级统计:`CareerAgentSessionStatsDO`;
+- 全局链路:`RagTraceContext` / `RagTraceNode` / `RagTraceRoot` 支持树形 Trace。
 
-- 大规模文档的增量更新，不可能每次全量重建索引
-- 多租户隔离和权限控制，不同部门看到的知识库不一样
-- 高并发下的检索性能，模型调用的成本控制和容错
-- 请求风控，防止用户套取敏感信息或恶意攻击
-- 模型负载均衡，多供应商切换和降级策略
-- 可观测性，效果监控和用户反馈收集
+管理员可在 Dashboard 回放任意一次 Agent 决策,看到完整的 Prompt / 工具调用链 / 响应。
 
-这些问题 OpenAI/LangChain 的 QuickStart 不会告诉你，但面试官和实际业务一定会考你。
+### 8. MCP 工具调用
 
-### 4. 只关注模型，忽略工程能力
+`mcp-server/`(独立模块,可独立部署)
 
-RAG 项目的核心竞争力不在于你用了多强的模型，而在于工程化能力。同样的模型，检索策略不同、Prompt 设计不同、分块粒度不同，最终效果可以天差地别。
+- 基于 `io.modelcontextprotocol.sdk 1.1.2`;
+- 内置默认 MCP Server(`http://localhost:9099`);
+- 业务侧通过 `bootstrap/.../mcp/` 调用工具;
+- `prompt/mcp-parameter-extract.st`:从用户问题中抽取 MCP 工具调用参数;
+- `prompt/answer-chat-mcp.st` / `answer-chat-mcp-kb-mixed.st`:纯工具调用 / 工具 + KB 混合回答模板。
 
-举个例子：用户问“打印机墨盒怎么换”，文档里写的是“墨盒更换步骤”。关键词搜索直接匹配不上，但向量检索能理解它们是一回事。这背后是 Embedding 模型的选型、向量数据库的调优、检索结果的重排序——每一步都是工程决策，不是换个更贵的模型就能解决的。
+---
 
-面试中能把这些工程细节讲清楚的人，远比只会说"我用了 GPT-4"的人有说服力。
+## 🚄 快速开始
 
-</details>
+### 前置依赖
 
-## 🏗️ Ragent 核心设计
+- JDK 17
+- Maven 3.9+
+- PostgreSQL 14+
+- Redis 6+
+- RocketMQ 5.x(NameServer + Broker)
+- Milvus 2.6+(可选,也可切 pgvector,见 `rag.vector.type: pg`)
 
-采用前后端分离的架构模式，后端按职责分为四个 Maven 模块。
+### 本地启动
 
-这里需要重点说下，分层不是为了炫技，而是解决实际问题：`framework` 层提供与业务无关的通用能力，`infra-ai` 层屏蔽不同模型供应商的差异，`bootstrap` 层专注业务逻辑。换模型供应商不用改业务代码，换业务逻辑不用动基础设施。
+```bash
+# 1. 克隆仓库
+git clone https://github.com/ZXT-shuaibi/HireSpark.git
+cd HireSpark
 
-![](assets/ragent-module-layering-v2.png)
+# 2. 初始化数据库
+psql -U postgres -f resources/database/schema_pg.sql
+psql -U postgres -f resources/database/init_data_pg.sql
 
-一次用户提问，在 Ragent AI 服务里经过的核心链路如下所示：
+# 3. 修改 bootstrap/src/main/resources/application.yaml
+#    配置 datasource / redis / rocketmq / milvus / LLM API Key
 
-> 实际项目代码中，逻辑比图表上更加复杂。下图仅展示核心流程，落地过程中还涉及很多细节和优化。
+# 4. 启动 MCP Server(可选,独立进程)
+mvn -pl mcp-server spring-boot:run
 
-![](assets/ragent-chain-v2.png)
+# 5. 启动主应用
+mvn -pl bootstrap spring-boot:run
+```
 
-<details>
-<summary><b>多路检索架构、模型路由与容错等</b>（点击展开）</summary>
+应用启动后监听 `http://localhost:9090/api/ragent`,OpenAPI 文档访问 `/swagger-ui`。
 
-检索是 RAG 系统的核心，Ragent 的检索引擎采用多通道并行 + 后处理流水线的架构：
+### Docker 启动
 
-![](assets/multi-channel-retrieval.png)
+```bash
+docker build -t hirespark:latest .
+docker run -p 9090:9090 \
+  -e SPRING_DATASOURCE_URL=jdbc:postgresql://host:5432/ragent \
+  -e SPRING_DATA_REDIS_HOST=redis-host \
+  -e ROCKETMQ_NAME_SERVER=rocketmq-host:9876 \
+  hirespark:latest
+```
 
-每个通道独立执行、互不影响，通过线程池并行调度。后处理器按顺序串联，像流水线一样逐步精炼检索结果。
+完整 docker-compose 见 `resources/docker/ragent-dev-stack.compose.yaml`。
 
-生产环境不可能只依赖一个模型供应商，Ragent 的模型路由机制解决的就是这个问题：
+### 验证脚本
 
-![](assets/model-routing-failover.png)
+```bash
+python scripts/verify_post_fusion_acceptance.py
+```
 
-关键设计：首包探测阶段会缓冲所有事件，确保模型切换时用户端不会收到半截的脏数据。
+该脚本会检查 Dockerfile 健康检查、CI 流程、Compose 健康端点、OpenAPI 分组、中文字体策略、TTS 契约等关键交付项。
 
-文档从上传到可检索，经过一条基于节点编排的 Pipeline：
+---
 
-<img src="assets/ingestion-pipeline.png" width="25%" />
+## 🗺️ 业务流程(求职侧)
 
-每个节点的配置存储在数据库中，支持条件执行和输出链式传递。每个任务和节点都有独立的执行日志，出了问题能精确定位到哪一步。
+```
+[简历上传]
+   │  Apache Tika / OCR
+   ▼
+[简历解析 → ResumeVersionDO]
+   │
+   ├───► [手动录入 JD]  ──┐
+   │                     │
+   └───► [JD 抓取(WebMagic)] ──┐
+                             │
+                             ▼
+              [JD-简历对齐分析]
+              JobAlignmentReportDO
+                             │
+                             ▼
+              [Coordinator Agent]
+              生成阶段化面试计划
+                             │
+            ┌────────────────┼────────────────┐
+            ▼                ▼                ▼
+   [JdAlignmentAgent] [TechnicalAgent] [ReflectorAgent]
+            │                │                │
+            └────────────────┼────────────────┘
+                             │
+                             ▼
+              [追问决策规则链]
+              FollowUpDecisionRule × 5
+                             │
+                             ▼
+              [面试评分 + 报告生成]
+              InterviewReportDO + PDF/Word
+                             │
+                             ▼
+              [简历优化建议]
+              ResumeOptimizationTaskDO
+                             │
+                             ▼
+              [Dashboard 统计 / Agent Trace 回放]
+```
 
-Ragent 不是为了用设计模式而用，每个模式都对应一个具体的工程问题：
+---
 
-| 设计模式   | 应用场景                                      | 解决的问题                               |
-| ---------- | --------------------------------------------- | ---------------------------------------- |
-| 策略模式   | SearchChannel、PostProcessor、MCPToolExecutor | 检索通道、后处理器、MCP 工具可插拔替换   |
-| 工厂模式   | IntentTreeFactory、StreamCallbackFactory      | 复杂对象的创建逻辑集中管理               |
-| 注册表模式 | MCPToolRegistry、IntentNodeRegistry           | 组件自动发现与注册，新增工具零配置       |
-| 模板方法   | IngestionNode 基类                            | 入库节点统一执行流程，子类只关注核心逻辑 |
-| 装饰器模式 | ProbeBufferingCallback                        | 在不修改原有回调的前提下增加首包探测能力 |
-| 责任链模式 | 后处理器链、模型降级链                        | 多个处理步骤按顺序串联，灵活组合         |
-| 观察者模式 | StreamCallback                                | 流式事件的异步通知                       |
-| AOP        | @RagTraceNode、@ChatRateLimit                 | 链路追踪和限流逻辑与业务代码解耦         |
+## 🔧 改造方向(适合作为二次开发起点)
 
-</details>
+1. **新业务场景**:复用 Agent 框架与 SingleFlight,新增"AI 模拟群面"、"AI 模拟 HR 面"、"AI 模拟笔试"等场景;
+2. **RAG 增强**:在 `HierarchicalRetrievalService` 之前增加 query 改写器(query2doc / HyDE / step-back prompting);
+3. **评测体系**:构造 100 题面试评测集,接入 Agent Trace 做端到端自动评测;
+4. **A/B 实验框架**:支持同时上线两版 Prompt Template 并对比效果;
+5. **Spring AI 对比模块**:新增 `infra-ai-springai` 实验模块,用 Spring AI 重构某条链路作为对比验证;
+6. **行业垂直化**:把"求职"改为"律师考试备考"、"医生执业考试"、"教师资格证"等垂直行业。
 
-## ✨ 项目质量怎么样？
+---
 
-说一个项目是企业级，不能光靠嘴说，得看实际的工程质量。从几个维度来评估 Ragent：
+## 📜 License
 
-### 1. 代码规模
+本仓库遵循 **Apache License 2.0**,详见 [LICENSE](LICENSE) 文件。
 
-- 后端 Java 代码：约 40000 行，覆盖 400+ 个源文件
-- 前端 TypeScript/React 代码：约 18000 行
-- 数据库设计：20 张业务表，涵盖会话、消息、知识库、文档、分块、意图树、入库流水线、链路追踪、用户等完整业务域
-- 前端页面：22 个页面/组件，包含聊天界面、管理后台（仪表板、知识库管理、意图树编辑、入库监控、链路追踪、用户管理、系统设置）
+基于 [nageoffer/ragent](https://github.com/nageoffer/ragent) 二次开发,使用请保留原作者署名。
 
-> 这不是一个周末能撸完的 Demo，是一个有完整业务闭环的系统。
+---
 
-### 2. 工程规范
+## 🙏 致谢
 
-- **分层架构**：framework / infra-ai / bootstrap 三层职责清晰，不存在基础设施代码和业务代码混在一起的问题。
-- **设计模式实战**：策略、工厂、观察者、装饰器、模板方法、责任链、外观——每个都解决实际的扩展性或解耦问题。
-- **framework 基础设施层**：独立 Maven 模块，23 个类覆盖 10 个横切关注点——三级异常体系 + 统一异常拦截、双维度幂等、Snowflake 分布式 ID 算法、用户上下文与 Trace 上下文跨线程透传、`SseEmitterSender` 线程安全 SSE 封装、统一响应体与错误码规范。业务模块只需引入依赖和加注解，零样板代码。
-- **队列式并发限流**：基于 Redis 信号 + 有序集合（ZSET）+ Pub/Sub 通知实现分布式排队限流。请求先入 ZSET 排队，通过 Lua 脚本原子判断是否在队头窗口内再出队，信号量控制最大并发数并支持许可自动过期（防死锁）。跨实例通过 Pub/Sub 广播唤醒，本地合并通知避免惊群效应。排队超时自动踢出，全程 SSE 推送排队状态。
-- **8 个专用线程池 + TTL 透传**：按工作负载特征配置了 8 个独立线程池（MCP 批量调用、RAG 上下文组装、多路检索、内部检索、意图分类、记忆摘要、模型流式输出、对话入口），队列类型和拒绝策略各不相同。所有线程池都用 `TtlExecutors` 包装，确保用户上下文和 Trace 信息在异步线程中不丢失。
-- **三态熔断器**：实现了经典的三态熔断器（CLOSED → OPEN → HALF_OPEN），每个模型独立维护健康状态。失败次数达到阈值自动熔断，冷却期后进入半开状态放行探测请求，探测成功恢复、失败继续熔断。配合优先级降级链，一个模型挂了自动切到下一个候选，业务层无感知。
-
-> 项目中大量应用并发线程，建议配合社群里的 [oneThread 动态线程池框架](https://nageoffer.com/onethread) 搭配学习收获更多。
-
-### 3. 可扩展性
-
-这是衡量一个项目是否企业级的关键指标。Ragent 的核心模块都预留了扩展点：
-
-- **新增检索通道**：实现 `SearchChannel` 接口，注册为 Spring Bean，自动生效。
-- **新增后处理器**：实现 `SearchResultPostProcessor` 接口，自动加入处理链。
-- **新增 MCP 工具**：实现 `MCPToolExecutor` 接口，自动被 `DefaultMCPToolRegistry` 发现。
-- **新增入库节点**：实现 `IngestionNode` 接口，可插入 Pipeline 任意位置。
-- **新增模型供应商**：在 `infra-ai` 层实现 `ChatClient` 接口，配置候选列表即可参与路由。
-
-> 不需要改框架代码，不需要改配置文件里的硬编码列表，加个实现类就完事了。这才是面向接口编程的正确打开方式。
-
-### 4. 生产级特性
-
-很多开源项目做到能跑就停了，Ragent 还考虑了这些生产环境必须面对的问题：
-
-| 特性 | 说明 |
-|:---|:---|
-| **限流** | 支持全局并发限制和用户级限流，防止模型调用被打爆 |
-| **熔断** | 模型健康检查 + 失败计数，自动熔断不可用的模型，避免反复超时 |
-| **可观测性** | 基于 AOP 的全链路 Trace，每个环节的耗时、输入输出、异常信息都有记录 |
-| **流式输出** | SSE 实时推送，首包探测机制保证模型切换时用户无感知 |
-| **会话管理** | 记忆压缩、摘要持久化、TTL 过期，不会因为聊天轮次多了就 OOM 或者 Token 爆炸 |
-| **认证鉴权** | 基于 Sa-Token 的用户认证体系，不是裸奔的 API |
-
-### 5. 精美控制台
-
-Ragent 提供完整的可视化控制台，覆盖**普通用户与管理员用户**两类使用场景，界面简洁直观，操作高效便捷。
-
-系统通过多轮 AI 辅助设计优化，在保证功能完整性的同时，提供更加现代化和友好的交互体验。
-
-#### 5.1 用户问答界面
-
-用户访问 Ragent 首页后，可在输入框中直接输入问题发起问答，同时支持开启**深度思考模式**以获得更高质量的回答。
-
-输入框下方提供示例问题标签，用户点击即可自动填充问题，方便快速体验系统能力。
-
-- 支持自然语言输入
-- 支持示例问题快速填充
-- 支持深度思考模式
-
-![](assets/qa-home.png)
-
-用户提交问题后，模型会实时生成回答结果，并提供良好的阅读体验：
-
-- 支持 Markdown 格式渲染
-- 支持图片内容展示
-- 支持代码高亮显示
-- 支持回答评价（点赞 / 点踩）
-
-![](assets/qa-answer.png)
-
-#### 5.2 管理后台
-
-Ragent 提供功能完善的管理后台，用于系统配置与运行管理。管理员可以通过后台完成模型管理、系统配置及数据管理等操作。
-
-<details>
-<summary><b>管理后台界面截图</b>（点击展开）</summary>
-
-![](assets/admin-overview.png)
-
-![](assets/admin-settings.png)
-
-![](assets/admin-knowledge-base.png)
-
-![](assets/admin-datasets.png)
-
-![](assets/admin-trace.png)
-
-![](assets/admin-models.png)
-
-</details>
-
-为了避免传统系统常见的毛坯界面体验，Ragent 的控制台经过多轮 AI 辅助设计与优化，逐步迭代完善，最终呈现出当前简洁、美观且实用的界面效果。
-
-![](assets/admin-theme.png)
-
-### 6. 和市面上项目的区别
-
-| 对比维度 | 典型 Demo 项目     | Ragent                           |
-| -------- | ------------------ | -------------------------------- |
-| 检索方式 | 单路向量检索       | 多通道并行 + 后处理流水线        |
-| 意图识别 | 无                 | 树形意图体系 + 歧义引导          |
-| 问题处理 | 原始问题直接检索   | 重写 + 拆分 + 上下文补全         |
-| 模型调用 | 单模型，挂了就挂了 | 多候选路由 + 首包探测 + 自动降级 |
-| 会话记忆 | 全量塞给模型       | 滑动窗口 + 自动摘要压缩          |
-| 文档入库 | 手动脚本           | 可编排的 Pipeline + 节点日志     |
-| 可观测性 | 无                 | 全链路 Trace                     |
-| 工具调用 | 无                 | MCP 协议集成                     |
-| 管理后台 | 无                 | 完整的 React 管理界面            |
-
-总结一下：Ragent 的代码量、架构设计、工程规范、扩展机制和生产级特性，都对得起企业级这三个字。它不是让你背概念用的，是让你理解企业里的 RAG 系统到底长什么样、每个设计决策背后的 why 是什么。
-
-## ❓ 常见问题答疑
-
-一句话：学完 Ragent，你既能跟面试官聊 RAG/Agent 的技术深度，也能证明自己的 Java 工程化水平。
-
-<details>
-<summary><b>能学到什么 / 适合谁？</b>（点击展开）</summary>
-
-### 1. 能够学到什么？
-
-Ragent 不只是教你调 API，而是让你理解一个 RAG 系统从 0 到 1 落地的全过程。粗略来说，你能收获这些：
-
-- **RAG 全链路工程能力**：文档解析、分块策略、Embedding 向量化、多路检索、重排序、Prompt 组装、流式生成，每个环节怎么做、为什么这么做。
-- **AI 应用架构设计**：意图识别体系、问题重写与拆分、会话记忆管理、MCP 工具调用，这些是 AI 应用区别于传统 CRUD 系统的核心能力。
-- **模型工程化实践**：多模型路由、优先级调度、首包探测、熔断降级，解决的是模型不稳定怎么办这个生产环境的真实问题。
-- **高质量 Java 工程能力**：分层架构、设计模式实战、分布式并发限流、多线程池管理与上下文透传、全链路追踪，这些能力不局限于 AI 项目，放到任何 Java 后端岗位都是加分项。
-- **前后端完整项目经验**：后端 Spring Boot 3 + 前端 React 18，从 API 设计到页面交互，完整的全栈项目经历。
-
-### 2. 适合人群
-
-**校招同学：**
-
-- **Java 后端方向的在校生**：简历上已经有了商城、外卖等常规项目，需要一个有区分度的项目来拉开差距。Ragent 能让你在面试中聊 AI + 工程化，而不是千篇一律的 CRUD。
-- **想转 AI 应用方向的同学**：对大模型感兴趣，但不想从 Python 和算法入手。Ragent 基于 Java 技术栈，学习曲线平滑，不需要额外切换语言生态。
-- **准备实习/秋招/春招的同学**：大厂校招越来越看重候选人对新技术的敏感度，简历上有 AI 项目经验，能直接证明你的学习能力和技术视野。
-
-**社招同学：**
-
-- **1-3 年经验的 Java 开发**：日常写业务代码，想往 AI 方向转型但不知道从哪下手。Ragent 的技术栈你都熟悉，学的是 AI 应用层的东西，上手快、能落地。
-- **3-5 年经验的后端开发**：技术能力不差，但面试被问到 AI 相关问题答不上来，少了一个谈薪筹码。通过 Ragent 补上 RAG、Agent、MCP 这些知识点，面试时能聊得有深度。
-- **想跳槽到 AI 团队的开发者**：越来越多的 JD 要求有 AI 相关经验，Ragent 能帮你快速建立 RAG 系统的全局认知，面试时不再只是纸上谈兵。
-
-</details>
-
-
-## 🌟 为什么开源？
-
-原因很简单：**对项目质量足够自信**。架构设计、代码实现、工程规范，每一行都经得起审视。好不好你 clone 下来自己看——目录结构、提交记录、注释规范，全是明牌。
-
-<details>
-<summary><b>开源背景与价值</b>（点击展开）</summary>
-
-之前做拿个 offer 社群时，第一个业务系统 12306 选择了开源，收获了
-<a href="https://github.com/nageoffer/12306"><img src="https://img.shields.io/github/stars/nageoffer/12306?style=flat-square&logo=github&label=GitHub" style="vertical-align: middle;" /></a>
-<a href="https://gitee.com/nageoffer/12306/stargazers"><img src="https://gitee.com/nageoffer/12306/badge/star.svg?theme=dark" style="vertical-align: middle;" /></a>，也得到了很多同学的认可和信任。这次 Ragent 作为社群在 AI 领域的第一个项目，同样选择开源——既然代码质量经得起检验，就没必要藏着掖着。
-
-市面上不少项目只敢放几张截图、讲几个概念，真正敢把代码全部摊开的并不多。Ragent 敢这么做，是因为前面讲的那些能力——多路检索、意图识别、模型容错、全链路追踪——不是 PPT 里的架构图，是你能跑起来、能断点调试、能逐行阅读的真实代码。
-
-开源对你来说意味着什么：
-
-- **源码即文档**：想了解某个模块怎么实现的，直接翻代码，比任何教程都准确、都及时。
-- **本地可调试**：断点打到任意一行，跟着一次请求走完整个 RAG 链路，比看架构图理解得深十倍。
-- **可参与贡献**：发现 Bug 提 Issue，有优化思路提 PR。参与一个企业级 AI 开源项目，本身就是简历上的亮点。
-- **持续迭代更新**：项目会持续演进，Star 和 Watch 之后能第一时间获取新特性。
-
-</details>
-
-<p align="center">
-  <a href="https://www.star-history.com/?repos=nageoffer%2Fragent&type=date&legend=top-left">
-    <picture>
-      <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/image?repos=nageoffer/ragent&type=date&theme=dark&legend=top-left" />
-      <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/image?repos=nageoffer/ragent&type=date&legend=top-left" />
-      <img alt="Star History Chart" src="https://api.star-history.com/image?repos=nageoffer/ragent&type=date&legend=top-left" />
-    </picture>
-  </a>
-</p>
-
-<p align="center">
-  如果屏幕前的亦菲/彦祖觉得项目还不错，点个 Star 支持一下，这是对开源作者最好的认可！
-</p>
+- [nageoffer/ragent](https://github.com/nageoffer/ragent) —— 提供了企业级 Agentic RAG 平台骨架与核心设计
+- 所有为本项目提交 Issue / PR 的贡献者
