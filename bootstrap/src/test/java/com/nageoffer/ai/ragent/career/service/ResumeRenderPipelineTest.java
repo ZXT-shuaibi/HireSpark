@@ -22,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 class ResumeRenderPipelineTest {
 
@@ -117,6 +118,7 @@ class ResumeRenderPipelineTest {
 
     @Test
     void htmlPdfAndDocxRenderCjkTypographyAcceptanceSample() throws Exception {
+        assumeTrue(pdfFontsAvailable(), "CJK fonts not available, skipping PDF rendering test");
         String cjkSample = cjkTypographySample();
         ResumeVersionDO version = ResumeVersionDO.builder()
                 .id("version-cjk")
@@ -237,6 +239,7 @@ class ResumeRenderPipelineTest {
      */
     @Test
     void pdfRenderStartsWithPdfHeader() {
+        assumeTrue(pdfFontsAvailable(), "CJK fonts not available, skipping PDF rendering test");
         ResumeRenderOutput output = pipeline.render(resumeVersionWithMarkdown(), "PDF");
 
         assertTrue(new String(output.content(), 0, 4, StandardCharsets.US_ASCII).startsWith("%PDF"));
@@ -259,6 +262,13 @@ class ResumeRenderPipelineTest {
     /**
      * 构造带 Markdown 正文的简历版本。
      */
+    private boolean pdfFontsAvailable() {
+        ResumeRenderFontRegistry registry = new ResumeRenderFontRegistry();
+        ResumeRenderFontRegistry.FontRegistrationReport report =
+                registry.registerPdfFonts(new PdfRendererBuilder().toStream(new ByteArrayOutputStream()));
+        return report.registeredCount() >= 1;
+    }
+
     private ResumeVersionDO resumeVersionWithMarkdown() {
         return ResumeVersionDO.builder()
                 .id("version-1")
